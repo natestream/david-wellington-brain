@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "david-wellington-brain",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+
+  // D1: structured tables (doors, daily_kpis, notes).
+  // database_id is left out on purpose: `wrangler deploy` and the
+  // Deploy to Cloudflare button create the database on the account that deploys.
+  // For your own account you can paste the id from `wrangler d1 create david-brain`.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "david-brain",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Vectorize: semantic search over doors and notes.
+  // Must be 768 dimensions, cosine (matches @cf/baai/bge-base-en-v1.5).
+  // `remote: true` makes `wrangler dev` use the real index (it can't run locally).
+  "vectorize": [
+    {
+      "binding": "VECTORS",
+      "index_name": "david-brain-notes",
+      "remote": true
+    }
+  ],
+
+  // Workers AI: embeddings only. No other model is called by the server.
+  "ai": { "binding": "AI", "remote": true }
+
+  // Secret (not in this file): BRAIN_KEY. Set with `wrangler secret put BRAIN_KEY`.
+}

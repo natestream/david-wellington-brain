@@ -1,0 +1,3 @@
+# Secret the Worker needs. Pick a long random string, e.g. `openssl rand -hex 32`.
+# Local dev: copy this file to .dev.vars. Production: `wrangler secret put BRAIN_KEY`.
+BRAIN_KEY=
