@@ -5,7 +5,7 @@ import { DATE_RE, isValidDate, nowIso, today } from "../lib/dates";
 import { guard, ok, rate } from "../lib/result";
 
 /**
- * The KPI columns. PLACEHOLDERS until David's CRM PDF fields are confirmed (issue #12).
+ * The KPI columns. PLACEHOLDERS until the fields on David's Rotor CRM report are confirmed (issue #12).
  * To change them: edit this list, add a migration for the new columns, and update
  * computeRates() if a rate depends on a renamed field. Anything else on the PDF
  * goes into `extra` (JSON) in the meantime, so nothing is lost.
@@ -196,16 +196,16 @@ export function registerKpiTools(server: McpServer, env: Env) {
     "save_daily_kpis",
     {
       title: "Save daily KPIs",
-      description: `Save one day's numbers from David's CRM (usually the end-of-day PDF he drops into the chat). One row per rep per day; saving the same day again replaces it.
+      description: `Save one day's numbers from David's CRM, Rotor (usually the end-of-day Rotor report PDF or screenshot he drops into the chat). One row per rep per day; saving the same day again replaces it.
 
-Before calling: read the PDF yourself and pull out the numbers. Map them to the fields below. Leave a field out if the PDF doesn't show it; never guess. Put any other numbers on the PDF into extra (e.g. {"cancellations": 1}). Write a 1-2 sentence raw_summary of the PDF. The PDF itself is not stored.
+Before calling: read the PDF yourself and pull out the numbers. Map them to the fields below. Leave a field out if the PDF doesn't show it; never guess. Put any other numbers on the PDF into extra (e.g. {"service_plans_sold": 2, "cancellations": 1}); Rotor is built around recurring service plans, so keep those if shown. Write a 1-2 sentence raw_summary of the PDF. The PDF itself is not stored.
 
 After calling: confirm in one or two lines: the key numbers and rates (rates are fractions; say them as percentages). If logged_vs_crm shows a gap (e.g. "CRM says 62 doors, 18 logged"), mention it briefly and without nagging.`,
       inputSchema: {
         date: dateField.optional().describe("The day the numbers are for, YYYY-MM-DD. Take it from the PDF; leave out for today (Los Angeles time)."),
         rep: z.string().optional().describe("Whose numbers. Leave out for David."),
         ...kpiShape(),
-        source: z.enum(KPI_SOURCES).optional().describe("pdf (default): from a PDF. crm: pulled from the CRM directly. manual: he typed them."),
+        source: z.enum(KPI_SOURCES).optional().describe("pdf (default): from a PDF. crm: pulled from the Rotor API directly. manual: he typed them."),
         raw_summary: z.string().nullish().describe("Your 1-2 sentence summary of the PDF."),
         extra: z
           .record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()]))

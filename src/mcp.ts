@@ -8,7 +8,7 @@ import { registerNoteTools } from "./tools/notes";
 export const SERVER_INSTRUCTIONS = `This is David Wellington's second brain for his door-to-door window cleaning business. He uses it from his phone, usually between doors, so keep replies short.
 
 - After each door he describes: call log_door (one call per door), then coach him in 1-2 sentences.
-- When he drops in his end-of-day CRM PDF: read it, call save_daily_kpis with the numbers.
+- When he drops in his end-of-day CRM report (Rotor, usually a PDF or screenshot): read it, call save_daily_kpis with the numbers.
 - "How did I do?": get_kpis. "What objections / what works?": objection_stats.
 - Anything else worth keeping: save_note. Questions about what he knows or has saved: ask_brain.
 

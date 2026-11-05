@@ -2,7 +2,7 @@
 
 A free, cloud-hosted second brain for door-to-door window cleaning, used from the Claude app on a phone.
 
-After each door, David tells Claude what happened, gets coaching right away, and the door is saved. At the end of the day he drops in his CRM PDF and his KPIs are saved as one clean row. Everything is reachable from any device signed in to his Claude account.
+After each door, David tells Claude what happened, gets coaching right away, and the door is saved. At the end of the day he drops in his Rotor CRM report and his KPIs are saved as one clean row. Everything is reachable from any device signed in to his Claude account.
 
 ## Setup for David (Saturday)
 
@@ -65,15 +65,30 @@ The tool descriptions in `src/tools/*.ts` are the product. They tell Claude when
 
 If an embedding fails (e.g. Workers AI quota), `log_door` and `save_note` still save the row and return a warning, so Claude never retries and duplicates it.
 
-## When David's CRM answers come in (#12)
+## CRM: Rotor (#12)
 
-The KPI columns are placeholders. To change them:
+David uses [Rotor](https://getrotor.com/), a CRM for window cleaning and exterior cleaning businesses built around selling recurring service plans door to door.
+
+**v1 (this build):** he drops his end-of-day Rotor report (PDF or screenshot) into Claude, and Claude calls `save_daily_kpis`. Nothing else is needed.
+
+**Rotor has a public API** ([docs](https://docs.api.getrotor.com/), [setup](https://rotor.stldocs.app/)), so a later version can pull the numbers itself with `source: "crm"`. From the docs index (not yet verified against a real account):
+
+- Base URL `https://api.getrotor.com/open-api/`, key in the `x-api-key` header plus a version header (`1.1.0`). `GET /open-api/auth/test` checks the key and lists its scopes.
+- Key: **Rotor → Settings → Integrations → API**: name it, pick permissions, optional expiry. It's shown once.
+- Endpoints: Leads, Customers (list, create/update), Service Plans, Serviced Jobs, **Pins** and **Pin Types** (the map pins dropped while canvassing, and their colors/labels).
+- Limit: 1,000 requests/day by default. The docs hint that access may need to be requested.
+
+Likely mapping for v2 (to confirm once the response fields are visible): pins dropped per rep per day → `doors_knocked`, pin type → outcome (no answer / not interested / sold), serviced jobs and service plans → `closes`, `revenue`, recurring plans sold. A small `sync_rotor_day` tool or a daily cron could fill `daily_kpis`, and `log_door` could attach the matching pin.
+
+**Still needed from David:** a sample end-of-day Rotor report (to lock the KPI columns), his Rotor plan, and, for v2, an API key with read-only scopes (store it as a Worker secret `ROTOR_API_KEY`, never in the repo).
+
+To change the KPI columns once the report is confirmed:
 
 1. Edit `KPI_FIELDS` in `src/tools/kpis.ts`. The tool schema, the SQL and the totals all read from it.
 2. Add `migrations/0002_kpi_fields.sql` with `ALTER TABLE daily_kpis ADD COLUMN ...`.
 3. Update `computeRates()` if a rate uses a renamed field, and the expected numbers in `test/kpis.test.ts`.
 
-Until then, Claude puts any other PDF numbers in `extra`, so nothing is lost. If the CRM has an API, a later version can pull the numbers directly with `source: "crm"`.
+Until then, Claude puts any other report numbers (e.g. service plans sold) in `extra`, so nothing is lost.
 
 Outcome and objection categories live in `OUTCOMES` / `OBJECTION_TYPES` in `src/tools/doors.ts` and in the `CHECK` constraints in the migration; change both together.
 
