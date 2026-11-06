@@ -25,7 +25,7 @@ describe("save_note + ask_brain (#8)", () => {
     const env = makeEnv();
     await callTool(env, "save_note", { title: "Goals", body: "Hit 100 doors a day by December. Buy a second ladder." });
     await callTool(env, "save_note", { title: "Price objection", body: "Too expensive? Offer a smaller first job, front windows only." });
-    await callTool(env, "log_door", { outcome: "closed", objection_type: "price", objection_text: "too expensive", response: "smaller first job" });
+    await callTool(env, "log_door", { outcome: "made_sale", objection_type: "price", objection_text: "too expensive", response: "smaller first job" });
 
     const all = await callTool(env, "ask_brain", { query: "what do I say when it's too expensive" });
     expect(all.results[0].kind === "note" ? all.results[0].note.title : all.results[0].door.response).toMatch(/Price objection|smaller first job/);
@@ -37,7 +37,7 @@ describe("save_note + ask_brain (#8)", () => {
     expect(notesOnly.results.every((r: any) => r.kind === "note")).toBe(true);
     const doorsOnly = await callTool(env, "ask_brain", { query: "too expensive", kind: "door" });
     expect(doorsOnly.results.length).toBe(1);
-    expect(doorsOnly.results[0].door.outcome).toBe("closed");
+    expect(doorsOnly.results[0].door.outcome).toBe("made_sale");
   });
 
   it("respects the limit", async () => {

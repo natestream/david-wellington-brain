@@ -2,7 +2,7 @@
 
 A free, cloud-hosted second brain for door-to-door window cleaning, used from the Claude app on a phone.
 
-After each door, David tells Claude what happened, gets coaching right away, and the door is saved. At the end of the day he drops in his Rotor CRM report and his KPIs are saved as one clean row. Everything is reachable from any device signed in to his Claude account.
+After each door, David tells Claude what happened, gets coaching right away, and the door is saved. At the end of the day he drops in his Rotor CRM pin export, adds his hours and ARR sold, and his 6 KPIs are saved as one clean row per rep. Everything is reachable from any device signed in to his Claude account.
 
 ## Setup for David (Saturday)
 
@@ -41,8 +41,8 @@ Budget check: a door is roughly 50 tokens to embed, so a 60-door day is about 20
 
 `migrations/0001_init.sql`:
 
-- **`doors`**: one row per door: `outcome`, `objection_type`, `objection_text`, `response`, `amount`, `area`, `notes`, `coaching`. This is the objections table.
-- **`daily_kpis`**: one row per rep per day (`UNIQUE(rep, date)`): `doors_knocked`, `contacts`, `pitches`, `quotes`, `closes`, `revenue`, `hours`, plus `source`, `raw_summary` and `extra` (JSON for any other PDF numbers). Rates are calculated when read, never stored.
+- **`doors`**: one row per door: `outcome` (Rotor's pin types: `gave_pitch`, `go_back`, `never_knock`, `door_hanger`, `no_answer`, `not_interested`, `made_sale`), `objection_type`, `objection_text`, `response`, `amount` (ARR for a sale), `area`, `notes`, `coaching`. This is the objections table.
+- **`daily_kpis`**: one row per rep per day (`UNIQUE(rep, date)`) holding only the KPI inputs: the 8 counts from the Rotor pin export (`total`, `gave_pitch`, `go_back`, `never_knock`, `door_hanger`, `no_answer`, `not_interested`, `made_sale`) plus `hours_knocked` and `arr_sold` entered by the rep, and `source`, `raw_summary`, `extra`. Subtotals and KPIs are calculated when read, never stored.
 - **`notes`**: general second-brain content (replaces his local Obsidian vault). `tags` is a JSON array.
 
 Every row has `rep` (default `david`), so his sales team can join later without a migration.
@@ -54,12 +54,32 @@ Vector IDs carry their kind (`door:<id>`, `note:<id>#<chunk>`), so search needs 
 | Tool | What it does | Issue |
 |---|---|---|
 | `log_door` | Save a door, return the 5 most similar past doors + history for that objection so Claude can coach from his own record | #4 |
-| `save_daily_kpis` | Upsert one day's CRM numbers, compare with the doors logged that day ("CRM says 62 doors, 18 logged") | #5 |
-| `get_kpis` | Totals and rates for a day or range, by day, Monday-start week, or none | #6 |
+| `save_daily_kpis` | Upsert one rep's day from the Rotor pin export + hours and ARR, return the 6 KPIs, compare with doors logged ("Rotor says 61 pins, 18 doors logged") | #5 |
+| `get_kpis` | The 6 KPIs for a day or range, per rep or the whole team, by day, Monday-start week, or none | #6 |
 | `objection_stats` | Per objection: count, closes, close rate, and the 3 latest responses that closed | #7 |
 | `save_note` / `ask_brain` | General notes + semantic search across notes and doors | #8 |
 
-Rates: contact rate = contacts / doors, close rate = closes / pitches, revenue per door, avg ticket = revenue / closes, revenue per hour. A rate is `null` when its denominator is 0 or missing.
+### KPIs (from David's "Wellington Sales KPI Calculations")
+
+| Subtotal | Formula |
+|---|---|
+| Adjusted Doors | Total − Go Back − Never Knock − Door Hanger |
+| Answered | Adjusted Doors − No Answer |
+| Pitches | Gave Pitch + Made Sale |
+| Plans Sold | Made Sale |
+
+| KPI | Formula |
+|---|---|
+| Doors per Hour | Adjusted Doors ÷ Hours Knocked |
+| Answer Rate | Answered ÷ Adjusted Doors |
+| Backyard Rate | Pitches ÷ Answered |
+| Conversion Rate | Plans Sold ÷ Pitches |
+| Revenue per Hour (annualized) | ARR Sold ÷ Hours Knocked |
+| Average ARR per Plan (annualized) | ARR Sold ÷ Plans Sold |
+
+ARR is always one year of revenue, even when the agreement runs longer. All of this lives in `computeKpis()` in `src/tools/kpis.ts`. For a date range or the whole team, the inputs are added up first and the KPIs are calculated from the totals, never averaged. A KPI is `null` when its denominator is 0 or missing (for example before hours are entered).
+
+Saving the same rep and day again updates the row, and fields left out keep their saved value. So the flow is: drop in the export (pins saved), Claude asks for hours and ARR, then those get added to the same row.
 
 The tool descriptions in `src/tools/*.ts` are the product. They tell Claude when to call each tool, what to extract first, and to keep coaching short.
 
@@ -69,28 +89,20 @@ If an embedding fails (e.g. Workers AI quota), `log_door` and `save_note` still 
 
 David uses [Rotor](https://getrotor.com/), a CRM for window cleaning and exterior cleaning businesses built around selling recurring service plans door to door.
 
-**v1 (this build):** he drops his end-of-day Rotor report (PDF or screenshot) into Claude, and Claude calls `save_daily_kpis`. Nothing else is needed.
+**v1 (this build):** he drops in the Rotor **"New Pins by Team Member"** export (CSV, PDF or screenshot; columns: Team Member, Total, Gave Pitch, Go Back, Never Knock, Door Hanger, No Answer, Not Interested, Made Sale). Claude calls `save_daily_kpis` once per team member with pins, using `david` for David and lowercase-hyphenated names for teammates (e.g. `noah-vonderlinden`). It then asks for hours knocked and ARR sold, which aren't on the export.
 
-**Rotor has a public API** ([docs](https://docs.api.getrotor.com/), [setup](https://rotor.stldocs.app/)), so a later version can pull the numbers itself with `source: "crm"`. From the docs index (not yet verified against a real account):
+**Rotor has a public API** ([docs](https://docs.api.getrotor.com/), [setup](https://rotor.stldocs.app/)), so a later version can pull the pin counts itself with `source: "crm"`. From the docs index (not yet verified against a real account):
 
 - Base URL `https://api.getrotor.com/open-api/`, key in the `x-api-key` header plus a version header (`1.1.0`). `GET /open-api/auth/test` checks the key and lists its scopes.
 - Key: **Rotor → Settings → Integrations → API**: name it, pick permissions, optional expiry. It's shown once.
-- Endpoints: Leads, Customers (list, create/update), Service Plans, Serviced Jobs, **Pins** and **Pin Types** (the map pins dropped while canvassing, and their colors/labels).
+- Endpoints: Leads, Customers (list, create/update), Service Plans, Serviced Jobs, **Pins** and **Pin Types**.
 - Limit: 1,000 requests/day by default. The docs hint that access may need to be requested.
 
-Likely mapping for v2 (to confirm once the response fields are visible): pins dropped per rep per day → `doors_knocked`, pin type → outcome (no answer / not interested / sold), serviced jobs and service plans → `closes`, `revenue`, recurring plans sold. A small `sync_rotor_day` tool or a daily cron could fill `daily_kpis`, and `log_door` could attach the matching pin.
+v2 idea: a `sync_rotor_day` tool that lists a day's pins, counts them per rep and pin type (the same numbers as the export), and saves them with `source: "crm"`. Hours and ARR would still come from the rep, unless service plans in the API carry the ARR.
 
-**Still needed from David:** a sample end-of-day Rotor report (to lock the KPI columns), his Rotor plan, and, for v2, an API key with read-only scopes (store it as a Worker secret `ROTOR_API_KEY`, never in the repo).
+**Still needed from David for v2:** his Rotor plan and an API key with read-only scopes (stored as a Worker secret `ROTOR_API_KEY`, never in the repo).
 
-To change the KPI columns once the report is confirmed:
-
-1. Edit `KPI_FIELDS` in `src/tools/kpis.ts`. The tool schema, the SQL and the totals all read from it.
-2. Add `migrations/0002_kpi_fields.sql` with `ALTER TABLE daily_kpis ADD COLUMN ...`.
-3. Update `computeRates()` if a rate uses a renamed field, and the expected numbers in `test/kpis.test.ts`.
-
-Until then, Claude puts any other report numbers (e.g. service plans sold) in `extra`, so nothing is lost.
-
-Outcome and objection categories live in `OUTCOMES` / `OBJECTION_TYPES` in `src/tools/doors.ts` and in the `CHECK` constraints in the migration; change both together.
+Door outcomes use Rotor's pin types, so logged doors compare 1:1 with the export. Outcome and objection categories live in `OUTCOMES` / `OBJECTION_TYPES` in `src/tools/doors.ts` and in the `CHECK` constraints in the migration; change both together.
 
 ## Layout
 
@@ -101,7 +113,7 @@ src/
   admin.ts          # POST /admin/import for the one-time markdown import
   tools/
     doors.ts        # log_door, objection_stats
-    kpis.ts         # save_daily_kpis, get_kpis (KPI_FIELDS lives here)
+    kpis.ts         # save_daily_kpis, get_kpis (KPI_FIELDS + computeKpis live here)
     notes.ts        # save_note, ask_brain
   lib/
     auth.ts         # x-brain-key check (constant-time), 401
@@ -179,12 +191,12 @@ This week's doors (Wed/Thu, before setup): paste his notes into Claude and say *
 
 ## Testing before the demo (#11)
 
-Covered by `npm test` (41 tests): auth/401, tool listing, every tool's SQL, upsert-not-duplicate, rates and divide-by-zero, week grouping, similar-door search, chunking, import idempotency, embedding failures.
+Covered by `npm test` (45 tests): auth/401, tool listing, every tool's SQL, upsert-not-duplicate, the 6 KPIs checked by hand against David's guide, divide-by-zero, week grouping, similar-door search, chunking, import idempotency, embedding failures.
 
 Still to do on a real Cloudflare account (can't be done from CI):
 
 - [ ] Deploy to Nate's free account (try the button) and confirm D1 + Vectorize (768, cosine) exist and the migration ran
-- [ ] Connect as a custom connector, then on a phone: log 5 fake doors with mixed objections, upload a sample CRM PDF, re-upload the same day, run `objection_stats` + `get_kpis` for the week
+- [ ] Connect as a custom connector, then on a phone: log 5 fake doors with mixed objections, drop in a Rotor pin export, give hours + ARR, re-upload the same day, run `objection_stats` + `get_kpis` for the week
 - [ ] Bad header → 401 against the deployed URL
 - [ ] Check Workers AI neuron usage after a simulated 60-door day
 - [ ] Wipe the test data; do the fresh deploy on David's account Saturday

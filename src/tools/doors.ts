@@ -6,7 +6,8 @@ import { embedOne } from "../lib/embed";
 import { guard, ok, rate } from "../lib/result";
 import { doorVectorId, hydrate, queryVectors, upsertVectors } from "../lib/vectors";
 
-export const OUTCOMES = ["no_answer", "not_interested", "pitched", "quoted", "closed", "callback"] as const;
+/** Same names as David's Rotor CRM pin types, so logged doors compare 1:1 with the pin export. */
+export const OUTCOMES = ["gave_pitch", "go_back", "never_knock", "door_hanger", "no_answer", "not_interested", "made_sale"] as const;
 export const OBJECTION_TYPES = ["price", "has_someone", "spouse", "timing", "diy", "not_needed", "other"] as const;
 
 export type Outcome = (typeof OUTCOMES)[number];
@@ -216,22 +217,22 @@ export async function objectionStats(env: Env, input: ObjectionStatsInput) {
   const { results: counts } = await env.DB.prepare(
     `SELECT objection_type,
             COUNT(*) AS count,
-            SUM(CASE WHEN outcome = 'closed' THEN 1 ELSE 0 END) AS closed,
-            SUM(CASE WHEN outcome = 'closed' THEN COALESCE(amount, 0) ELSE 0 END) AS closed_revenue
+            SUM(CASE WHEN outcome = 'made_sale' THEN 1 ELSE 0 END) AS sales,
+            SUM(CASE WHEN outcome = 'made_sale' THEN COALESCE(amount, 0) ELSE 0 END) AS arr_sold
        FROM doors
       WHERE ${whereSql}
       GROUP BY objection_type
       ORDER BY count DESC, objection_type`,
   )
     .bind(...params)
-    .all<{ objection_type: ObjectionType; count: number; closed: number; closed_revenue: number }>();
+    .all<{ objection_type: ObjectionType; count: number; sales: number; arr_sold: number }>();
 
   const { results: wins } = await env.DB.prepare(
     `SELECT objection_type, date, objection_text, response, amount FROM (
        SELECT objection_type, date, objection_text, response, amount,
               ROW_NUMBER() OVER (PARTITION BY objection_type ORDER BY date DESC, created_at DESC) AS rn
          FROM doors
-        WHERE ${whereSql} AND outcome = 'closed' AND response IS NOT NULL AND response != ''
+        WHERE ${whereSql} AND outcome = 'made_sale' AND response IS NOT NULL AND response != ''
      ) WHERE rn <= 3
      ORDER BY objection_type, rn`,
   )
@@ -248,10 +249,10 @@ export async function objectionStats(env: Env, input: ObjectionStatsInput) {
   const objections = (counts ?? []).map((c) => ({
     objection_type: c.objection_type,
     count: c.count,
-    closed: c.closed,
-    close_rate: rate(c.closed, c.count),
-    closed_revenue: c.closed_revenue,
-    responses_that_closed: winsByType.get(c.objection_type) ?? [],
+    sales: c.sales,
+    sale_rate: rate(c.sales, c.count),
+    arr_sold: c.arr_sold,
+    responses_that_sold: winsByType.get(c.objection_type) ?? [],
   }));
 
   const total = objections.reduce((n, o) => n + o.count, 0);
@@ -284,12 +285,12 @@ Before calling:
 1. Pull the fields out of his message. outcome is required. Map what the homeowner said to the closest objection_type; keep their words in objection_text and what David said back in response, in his own words.
 2. Write your coaching for this door and pass it in coaching. Keep it to 1-2 short sentences: one thing that went well or one thing to try at the next door.
 
-After calling: give the coaching in the chat. Keep the whole reply short; he is walking to the next door. If similar_doors or objection_history show a pattern (for example "the last 4 times you heard 'too expensive', offering a smaller first job closed 3"), add one line about it. Don't list the raw data back to him.`,
+After calling: give the coaching in the chat. Keep the whole reply short; he is walking to the next door. If similar_doors or objection_history show a pattern (for example "the last 4 times you heard 'too expensive', offering a smaller first job sold 3"), add one line about it. Don't list the raw data back to him.`,
       inputSchema: {
         outcome: z
           .enum(OUTCOMES)
           .describe(
-            "What happened. no_answer: nobody came to the door. not_interested: talked but no pitch. pitched: gave the pitch, no quote. quoted: gave a price. closed: booked the job. callback: asked to come back or call later.",
+            "What happened, using David's Rotor pin types. no_answer: nobody came to the door. not_interested: answered, no pitch. gave_pitch: pitched, no sale. made_sale: sold a plan. go_back: come back later (asked to, or a better time). never_knock: do-not-knock house. door_hanger: left a door hanger.",
           ),
         objection_type: z
           .enum(OBJECTION_TYPES)
@@ -299,7 +300,7 @@ After calling: give the coaching in the chat. Keep the whole reply short; he is 
           ),
         objection_text: z.string().nullish().describe("What the homeowner said, in David's words."),
         response: z.string().nullish().describe("What David said back."),
-        amount: z.number().nonnegative().nullish().describe("Quote or close amount in dollars, if any."),
+        amount: z.number().nonnegative().nullish().describe("For made_sale: ARR of the plan in dollars (one year of revenue, even if the agreement runs longer). For gave_pitch: the price quoted, if any."),
         area: z.string().nullish().describe("Street or neighborhood, if he mentioned it."),
         notes: z.string().nullish().describe("Anything else worth remembering about this door (house details, follow-up, mood)."),
         coaching: z.string().nullish().describe("Your 1-2 sentence coaching for this door."),
@@ -319,7 +320,7 @@ After calling: give the coaching in the chat. Keep the whole reply short; he is 
 
 Use when he asks things like "what objections am I getting most?", "how do I handle price?", "what's working this week?", or when building training material on objections.
 
-Returns, per objection_type: count, closed, close_rate (closed / count, 0-1), closed_revenue, and the 3 most recent responses that led to a close. Turn it into a short, practical answer: the top 1-3 objections and the line that works best for each. Rates are fractions; say them as percentages.`,
+Returns, per objection_type: count, sales (made_sale), sale_rate (sales / count, 0-1), arr_sold, and the 3 most recent responses that led to a sale. Turn it into a short, practical answer: the top 1-3 objections and the line that works best for each. Rates are fractions; say them as percentages.`,
       inputSchema: {
         from: dateField.optional().describe("Start date YYYY-MM-DD (inclusive). Leave out for all time."),
         to: dateField.optional().describe("End date YYYY-MM-DD (inclusive). Leave out for up to today."),
