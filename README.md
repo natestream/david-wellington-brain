@@ -9,7 +9,7 @@ After each door, David tells Claude what happened, gets coaching right away, and
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/natestream/david-wellington-brain)
 
 1. Sign up at cloudflare.com (free, no card).
-2. Click **Deploy to Cloudflare** above. It should create the Worker and the D1 database on his account and run the migration (`npm run deploy`). Verify this on Nate's account first (#11); the Cloudflare docs weren't reachable while this was built.
+2. Click **Deploy to Cloudflare** above. If it asks for the Vectorize index **dimensions**, enter `768`, metric `cosine`. It should create the Worker and the D1 database on his account and run the migration (`npm run deploy`). Verify this on Nate's account first (#11); the Cloudflare docs weren't reachable while this was built.
 3. When it asks for `BRAIN_KEY`, paste a long random string (e.g. from `openssl rand -hex 32`). Save it in his password manager.
 4. In Claude: **Settings → Connectors → Add custom connector**. URL `https://<worker>.workers.dev/mcp`, request header `x-brain-key: <BRAIN_KEY>`.
 5. Test: *"Log a door: no answer on Main St."*
