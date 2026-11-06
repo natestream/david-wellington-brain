@@ -127,6 +127,7 @@ migrations/
   0001_init.sql
 scripts/
   import.ts         # one-time markdown import
+  smoke.ts          # live smoke test for the #11 checklist
 test/               # vitest: real SQLite for D1, fakes for Vectorize + Workers AI
 wrangler.jsonc
 ```
@@ -195,10 +196,21 @@ This week's doors (Wed/Thu, before setup): paste his notes into Claude and say *
 
 Covered by `npm test` (45 tests): auth/401, tool listing, every tool's SQL, upsert-not-duplicate, the 6 KPIs checked by hand against David's guide, divide-by-zero, week grouping, similar-door search, chunking, import idempotency, embedding failures.
 
+`npm run smoke` runs the same flow against a live Worker (the deployed URL or `wrangler dev`):
+
+```bash
+BRAIN_KEY=... npm run smoke -- --url https://<worker>.workers.dev              # 5 doors, all checks
+BRAIN_KEY=... npm run smoke -- --url https://<worker>.workers.dev --doors 60   # simulated full day
+```
+
+It checks: 401 with no key, a wrong key, or the key in the query string; all 6 tools listed; 5 doors with mixed objections, with no search warning and similar past doors coming back; a sample Rotor export (61 pins) plus 5 h and $1,800 ARR, with all 6 KPIs checked against David's guide; a re-upload of the same day that still leaves 1 row; `objection_stats` and the weekly `get_kpis`; and `save_note` + `ask_brain`. Data goes in as rep `smoke-test` on a random past week, so runs don't mix with each other or with David. Run it on **Nate's** account only, because Vectorize search isn't filtered by rep. It prints the cleanup commands at the end.
+
+Already run against local `wrangler dev` (D1 only): auth, tools, KPIs, upsert, stats and week grouping all pass. The search checks need real Workers AI + Vectorize, so they only pass against a real deploy.
+
 Still to do on a real Cloudflare account (can't be done from CI):
 
-- [ ] Deploy to Nate's free account (try the button) and confirm D1 + Vectorize (768, cosine) exist and the migration ran
-- [ ] Connect as a custom connector, then on a phone: log 5 fake doors with mixed objections, drop in a Rotor pin export, give hours + ARR, re-upload the same day, run `objection_stats` + `get_kpis` for the week
-- [ ] Bad header → 401 against the deployed URL
-- [ ] Check Workers AI neuron usage after a simulated 60-door day
-- [ ] Wipe the test data; do the fresh deploy on David's account Saturday
+- [ ] Deploy to Nate's free account (try the button; the repo is public now) and confirm D1 + Vectorize (768, cosine) exist and the migration ran
+- [ ] `npm run smoke` against the deployed URL: all PASS
+- [ ] Connect as a custom connector, then on a phone: log 5 fake doors with mixed objections, drop in a real Rotor pin export, give hours + ARR, re-upload the same day, run `objection_stats` + `get_kpis` for the week. This tests Claude's side (tool descriptions, PDF reading, coaching), which the script can't.
+- [ ] `npm run smoke -- --doors 60`, then check Workers AI neurons in the dashboard (expect about 20 of 10,000)
+- [ ] Wipe the test data (or delete the Worker, D1 database and Vectorize index); do the fresh deploy on David's account Saturday
