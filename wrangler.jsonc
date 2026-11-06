@@ -30,7 +30,12 @@
   ],
 
   // Workers AI: embeddings only. No other model is called by the server.
-  "ai": { "binding": "AI", "remote": true }
+  "ai": { "binding": "AI", "remote": true },
 
-  // Secret (not in this file): BRAIN_KEY. Set with `wrangler secret put BRAIN_KEY`.
+  // v2: nightly Rotor sync at 05:30 UTC (9:30 pm PST / 10:30 pm PDT).
+  // It does nothing until the ROTOR_API_KEY and ROTOR_REP_EMAIL secrets are set.
+  "triggers": { "crons": ["30 5 * * *"] }
+
+  // Secrets (not in this file): BRAIN_KEY (required). Optional, for the Rotor sync:
+  // ROTOR_API_KEY and ROTOR_REP_EMAIL. Set each with `wrangler secret put <NAME>`.
 }
