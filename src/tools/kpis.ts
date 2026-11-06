@@ -84,7 +84,16 @@ export interface SaveKpisInput extends KpiValues {
 /** Door outcomes (log_door) use the same names as Rotor pin types, so they compare 1:1. */
 const LOGGED_OUTCOMES = PIN_FIELDS;
 
-export async function saveDailyKpis(env: Env, input: SaveKpisInput) {
+export interface SaveKpisOptions {
+  /**
+   * Fields that only fill a blank: an existing saved value wins.
+   * The Rotor sync uses this for hours_knocked and arr_sold so it never
+   * overwrites numbers David entered himself.
+   */
+  keepExisting?: readonly KpiField[];
+}
+
+export async function saveDailyKpis(env: Env, input: SaveKpisInput, opts: SaveKpisOptions = {}) {
   const date = input.date ?? today();
   if (!isValidDate(date)) throw new Error(`date must be YYYY-MM-DD, got "${date}"`);
   const rep = input.rep?.trim() || "david";
@@ -97,7 +106,11 @@ export async function saveDailyKpis(env: Env, input: SaveKpisInput) {
   // Fields left out keep their saved value, so "I knocked 5 hours, sold $1,800 ARR"
   // can be added after the pin export without re-sending the pin counts.
   const updates = [
-    ...[...KPI_FIELD_NAMES, "raw_summary", "extra"].map((c) => `${c} = COALESCE(excluded.${c}, daily_kpis.${c})`),
+    ...[...KPI_FIELD_NAMES, "raw_summary", "extra"].map((c) =>
+      opts.keepExisting?.includes(c as KpiField)
+        ? `${c} = COALESCE(daily_kpis.${c}, excluded.${c})`
+        : `${c} = COALESCE(excluded.${c}, daily_kpis.${c})`,
+    ),
     "source = excluded.source",
     "updated_at = excluded.updated_at",
   ].join(", ");

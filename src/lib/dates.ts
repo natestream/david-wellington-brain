@@ -27,6 +27,40 @@ export function isValidDate(date: string): boolean {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === date;
 }
 
+/** Minutes to add to Los Angeles wall-clock time to get UTC at this instant (480 in PST, 420 in PDT). */
+function laOffsetMinutes(instant: number): number {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", {
+      timeZone: TIME_ZONE,
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+      .formatToParts(new Date(instant))
+      .map((p) => [p.type, p.value]),
+  );
+  const asUtc = Date.UTC(+parts.year!, +parts.month! - 1, +parts.day!, +parts.hour!, +parts.minute!, +parts.second!);
+  return Math.round((instant - asUtc) / 60000);
+}
+
+/** Start of a Los Angeles calendar day as a UTC instant (ms). DST-safe. */
+function laMidnightUtc(date: string): number {
+  const [y, m, d] = date.split("-").map(Number) as [number, number, number];
+  const wall = Date.UTC(y, m - 1, d);
+  let guess = wall + laOffsetMinutes(wall + 8 * 3600_000) * 60000;
+  guess = wall + laOffsetMinutes(guess) * 60000;
+  return guess;
+}
+
+/** The UTC range [start, end) covering one Los Angeles calendar day. */
+export function laDayRangeUtc(date: string): { start: Date; end: Date } {
+  return { start: new Date(laMidnightUtc(date)), end: new Date(laMidnightUtc(addDays(date, 1))) };
+}
+
 export function nowIso(): string {
   return new Date().toISOString();
 }
