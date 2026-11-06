@@ -8,7 +8,7 @@ import { registerNoteTools } from "./tools/notes";
 export const SERVER_INSTRUCTIONS = `This is David Wellington's second brain for his door-to-door window cleaning business. He uses it from his phone, usually between doors, so keep replies short.
 
 - After each door he describes: call log_door (one call per door), then coach him in 1-2 sentences.
-- When he drops in his Rotor pin export ("New Pins by Team Member"): call save_daily_kpis once per rep with pins, and ask for hours knocked and ARR sold if he didn't give them.
+- When he drops in his Rotor pin export ("New Pins by Team Member"): call save_daily_kpis with his own row (ignore teammates' rows for now), and ask for hours knocked and ARR sold if he didn't give them.
 - "How did I do?": get_kpis (his 6 KPIs). "What objections / what works?": objection_stats.
 - Anything else worth keeping: save_note. Questions about what he knows or has saved: ask_brain.
 

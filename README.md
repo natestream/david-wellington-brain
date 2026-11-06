@@ -14,7 +14,7 @@ After each door, David tells Claude what happened, gets coaching right away, and
 4. In Claude: **Settings → Connectors → Add custom connector**. URL `https://<worker>.workers.dev/mcp`, request header `x-brain-key: <BRAIN_KEY>`.
 5. Test: *"Log a door: no answer on Main St."*
 
-Claude Free allows one custom connector, so this has to be his one.
+David is on Claude Free, which allows one custom connector. He has none yet, so this one fits.
 
 If the button doesn't create the Vectorize index (check **Storage & Databases → Vectorize** for `david-brain-notes`), run `npm run setup:vectorize` once from a laptop logged in to his account. It must be 768 dimensions, cosine.
 
@@ -45,7 +45,7 @@ Budget check: a door is roughly 50 tokens to embed, so a 60-door day is about 20
 - **`daily_kpis`**: one row per rep per day (`UNIQUE(rep, date)`) holding only the KPI inputs: the 8 counts from the Rotor pin export (`total`, `gave_pitch`, `go_back`, `never_knock`, `door_hanger`, `no_answer`, `not_interested`, `made_sale`) plus `hours_knocked` and `arr_sold` entered by the rep, and `source`, `raw_summary`, `extra`. Subtotals and KPIs are calculated when read, never stored.
 - **`notes`**: general second-brain content (replaces his local Obsidian vault). `tags` is a JSON array.
 
-Every row has `rep` (default `david`), so his sales team can join later without a migration.
+Every row has `rep` (default `david`). v1 is David only; the column is there so teammates can be added in a later version without a migration.
 
 Vector IDs carry their kind (`door:<id>`, `note:<id>#<chunk>`), so search needs no Vectorize metadata index and no extra setup.
 
@@ -89,7 +89,7 @@ If an embedding fails (e.g. Workers AI quota), `log_door` and `save_note` still 
 
 David uses [Rotor](https://getrotor.com/), a CRM for window cleaning and exterior cleaning businesses built around selling recurring service plans door to door.
 
-**v1 (this build):** he drops in the Rotor **"New Pins by Team Member"** export (CSV, PDF or screenshot; columns: Team Member, Total, Gave Pitch, Go Back, Never Knock, Door Hanger, No Answer, Not Interested, Made Sale). Claude calls `save_daily_kpis` once per team member with pins, using `david` for David and lowercase-hyphenated names for teammates (e.g. `noah-vonderlinden`). It then asks for hours knocked and ARR sold, which aren't on the export.
+**v1 (this build):** he drops in the Rotor **"New Pins by Team Member"** export (CSV, PDF or screenshot; columns: Team Member, Total, Gave Pitch, Go Back, Never Knock, Door Hanger, No Answer, Not Interested, Made Sale). Claude saves **David's row only** and ignores teammates' rows (teammates are out of scope for v1). It then asks for hours knocked and ARR sold, which aren't on the export.
 
 **Rotor has a public API** ([docs](https://docs.api.getrotor.com/), [setup](https://rotor.stldocs.app/)), so a later version can pull the pin counts itself with `source: "crm"`. From the docs index (not yet verified against a real account):
 
@@ -100,7 +100,9 @@ David uses [Rotor](https://getrotor.com/), a CRM for window cleaning and exterio
 
 v2 idea: a `sync_rotor_day` tool that lists a day's pins, counts them per rep and pin type (the same numbers as the export), and saves them with `source: "crm"`. Hours and ARR would still come from the rep, unless service plans in the API carry the ARR.
 
-**Still needed from David for v2:** his Rotor plan and an API key with read-only scopes (stored as a Worker secret `ROTOR_API_KEY`, never in the repo).
+**v2 backlog:**
+- **Rotor API sync** (Nate is looking into the API): confirm the Pins response fields, then add `sync_rotor_day`. Needs David's Rotor plan to include API access and a read-only key, stored as a Worker secret `ROTOR_API_KEY` (never in the repo).
+- **Teammates:** save every rep's row from the export (lowercase-hyphenated names, e.g. `jane-doe`), let reps log doors, and compare reps in `get_kpis`. The server already supports `rep` on every tool, so this is mostly tool descriptions plus a decision on whether reps get their own connector/key.
 
 Door outcomes use Rotor's pin types, so logged doors compare 1:1 with the export. Outcome and objection categories live in `OUTCOMES` / `OBJECTION_TYPES` in `src/tools/doors.ts` and in the `CHECK` constraints in the migration; change both together.
 

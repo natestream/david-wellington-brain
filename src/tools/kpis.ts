@@ -237,8 +237,8 @@ export function registerKpiTools(server: McpServer, env: Env) {
       description: `Save one rep's day from the Rotor CRM pin export ("New Pins by Team Member": Team Member, Total, Gave Pitch, Go Back, Never Knock, Door Hanger, No Answer, Not Interested, Made Sale), plus the two numbers the rep enters: hours_knocked and arr_sold. One row per rep per day.
 
 Before calling:
-1. Read the export (PDF, CSV, screenshot or pasted text) yourself. Call this once per team member whose Total is above 0; skip all-zero rows and "Unassigned".
-2. rep: David is "david". Anyone else: their name in lowercase with hyphens, as on the export (e.g. "Noah Vonderlinden" → "noah-vonderlinden").
+1. Read the export (PDF, CSV, screenshot or pasted text) yourself. For now this brain is David's only: save just David's row (the Team Member whose first name is David) and ignore the other team members, unless he explicitly asks you to save someone else's.
+2. Leave rep out (it defaults to "david"). Teammates come in a later version.
 3. Copy each pin count exactly. Never guess a number.
 4. hours_knocked and arr_sold aren't on the export. Use them if he gave them; otherwise save the pins now and ask him for both. ARR is one year of revenue per plan, even for longer agreements.
 5. Write a 1-sentence raw_summary. Other numbers worth keeping go in extra.
@@ -250,7 +250,7 @@ After calling: give the 6 KPIs in a short list (rates are fractions; say them as
 ${KPI_DEFINITIONS}`,
       inputSchema: {
         date: dateField.optional().describe("The day the numbers are for, YYYY-MM-DD. Take it from the export; leave out for today (Los Angeles time)."),
-        rep: z.string().optional().describe("'david' for David; otherwise the lowercase-hyphenated name from the export."),
+        rep: z.string().optional().describe("Leave out (David). Reserved for teammates in a later version."),
         ...kpiShape(),
         source: z.enum(KPI_SOURCES).optional().describe("pdf (default): from an export/PDF/screenshot. crm: pulled from the Rotor API directly. manual: he typed them."),
         raw_summary: z.string().nullish().describe("Your 1-sentence summary of the day."),
@@ -272,13 +272,13 @@ ${KPI_DEFINITIONS}`,
 
 Use for "how did I do today/this week/this month?", comparing weeks or reps, or spotting trends. For a range, the inputs are added up first and the KPIs are calculated from the totals (not an average of daily rates). A KPI is null when its denominator is 0 or missing (e.g. no hours_knocked saved). Rates are fractions; say them as percentages. Keep the answer short and lead with what changed.
 
-Today is in Los Angeles time. For "this week" pass from = Monday of this week. Leave rep out to combine the whole team.
+Today is in Los Angeles time. For "this week" pass from = Monday of this week. Leave rep out; for now everything is David's.
 
 ${KPI_DEFINITIONS}`,
       inputSchema: {
         from: dateField.optional().describe("Start YYYY-MM-DD (inclusive). Defaults to the same as to."),
         to: dateField.optional().describe("End YYYY-MM-DD (inclusive). Defaults to today."),
-        rep: z.string().optional().describe("Only this rep ('david', 'noah-vonderlinden', ...). Leave out to add up everyone."),
+        rep: z.string().optional().describe("Leave out (David). Reserved for teammates in a later version."),
         group_by: z.enum(["day", "week", "none"]).optional().describe("day (default): a row per day. week: a row per Monday-start week. none: totals only."),
       },
       annotations: { title: "Get KPIs", readOnlyHint: true, openWorldHint: false },
