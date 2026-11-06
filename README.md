@@ -4,21 +4,54 @@ A free, cloud-hosted second brain for door-to-door window cleaning, used from th
 
 After each door, David tells Claude what happened, gets coaching right away, and the door is saved. At the end of the day he drops in his Rotor CRM pin export, adds his hours and ARR sold, and his 6 KPIs are saved as one clean row per rep. Everything is reachable from any device signed in to his Claude account.
 
+## Deploys: one repo, every account (#16)
+
+This repo is the only copy of the code. GitHub Actions deploys it to each Cloudflare account, so David needs no GitHub account, and every fix reaches him with one merge.
+
+On every merge to `main` (or **Actions → Deploy → Run workflow**), `.github/workflows/deploy.yml` runs:
+
+1. **check**: typecheck + tests. Nothing deploys if they fail.
+2. **staging** (Nate's account): deploys, runs the full `npm run smoke` against it, then deletes the test data.
+3. **production** (David's account, one job per entry in `PROD_TARGETS`): deploys, then a read-only health check (`--health`: 401s + tools list, writes nothing). Runs only if staging passed.
+
+Each deploy (`scripts/ci-deploy.sh`) creates the D1 database and the Vectorize index (768, cosine) if they're missing, applies new migrations, then deploys the Worker with `BRAIN_KEY` set. So a first deploy on a fresh account needs no clicks in Cloudflare, and re-deploys never touch data. Keep migrations additive (new tables/columns): they apply just before the new code goes live.
+
+Each target is a GitHub **Environment** (**Settings → Environments**) with 3 secrets:
+
+| Secret | What |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | API token on that person's Cloudflare account (how to make one below) |
+| `CLOUDFLARE_ACCOUNT_ID` | Their account ID (dashboard → **Workers & Pages**, right-hand side) |
+| `BRAIN_KEY` | The key the Claude connector sends. Long random string (`openssl rand -hex 32`), different per account |
+
+The repo variable `PROD_TARGETS` (**Settings → Secrets and variables → Actions → Variables**) lists the production Environments, e.g. `["david"]`. Unset = staging only. A new client later = a new Environment + one entry (the server instructions name David, so make those configurable first).
+
+To approve David's deploys by hand, add yourself as a **Required reviewer** on the `david` Environment.
+
+### API token (one per account)
+
+In the account's Cloudflare dashboard: **My Profile → API Tokens → Create Token → "Edit Cloudflare Workers" template**, then add the account permissions **D1: Edit** and **Vectorize: Edit**, and set **Account Resources** to that account. Copy the token (it's shown once) straight into the GitHub secret. Not yet verified against a real account: if the first deploy fails with an auth error, the log names the missing permission.
+
+### One-time: staging on Nate's account (before Saturday)
+
+1. Create the `staging` Environment with the 3 secrets above (token from Nate's account).
+2. **Actions → Deploy → Run workflow**. The staging job should pass, including the smoke test.
+3. If the log warns about no workers.dev URL: open **Workers & Pages** in the dashboard once so the account gets a workers.dev subdomain, then run it again.
+
 ## Setup for David (Saturday)
 
-[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/natestream/david-wellington-brain)
-
-1. Sign up at cloudflare.com (free, no card).
-2. Click **Deploy to Cloudflare** above. If it asks for the Vectorize index **dimensions**, enter `768`, metric `cosine`. It should create the Worker and the D1 database on his account and run the migration (`npm run deploy`). Verify this on Nate's account first (#11); the Cloudflare docs weren't reachable while this was built.
-3. When it asks for `BRAIN_KEY`, paste a long random string (e.g. from `openssl rand -hex 32`). Save it in his password manager.
-4. In Claude: **Settings → Connectors → Add custom connector**. URL `https://<worker>.workers.dev/mcp`, request header `x-brain-key: <BRAIN_KEY>`.
-5. Test: *"Log a door: no answer on Main St."*
+1. He signs up at cloudflare.com (free, no card) and opens **Workers & Pages** once (sets up his workers.dev subdomain).
+2. He creates the API token (above) while you watch, and reads you his account ID.
+3. You create the `david` Environment with his token, account ID and a fresh `BRAIN_KEY` (save it in his password manager), and set `PROD_TARGETS` to `["david"]`.
+4. **Actions → Deploy → Run workflow**. When the production job is green, its log shows his URL.
+5. In Claude: **Settings → Connectors → Add custom connector**. URL `https://<worker>.<his-subdomain>.workers.dev/mcp`, request header `x-brain-key: <BRAIN_KEY>`.
+6. Test: *"Log a door: no answer on Main St."*
 
 David is on Claude Free, which allows one custom connector. He has none yet, so this one fits.
 
-If the button doesn't create the Vectorize index (check **Storage & Databases → Vectorize** for `david-brain-notes`), run `npm run setup:vectorize` once from a laptop logged in to his account. It must be 768 dimensions, cosine.
+No secrets live in the code. `BRAIN_KEY` and the tokens only live in GitHub Environments and on Cloudflare. He can revoke the token anytime from his Cloudflare profile; the Worker keeps running, only new deploys stop.
 
-The button needs this repo to be **public**. No secrets live in the code; `BRAIN_KEY` is only set on Cloudflare.
+The [Deploy to Cloudflare button](https://deploy.workers.cloudflare.com/?url=https://github.com/natestream/david-wellington-brain) still works for a one-off copy, but it copies the repo into the deployer's GitHub, and that copy doesn't get updates from here. If it asks for the Vectorize **dimensions**, enter `768`, metric `cosine`.
 
 ## Core principle: Claude thinks, the server stores
 
@@ -127,7 +160,11 @@ migrations/
   0001_init.sql
 scripts/
   import.ts         # one-time markdown import
-  smoke.ts          # live smoke test for the #11 checklist
+  smoke.ts          # live smoke test for the #11 checklist (--health: read-only)
+  ci-deploy.sh      # one account's deploy: ensure D1 + Vectorize, migrate, deploy (#16)
+.github/workflows/
+  ci.yml            # PRs: typecheck + tests
+  deploy.yml        # main: check → staging + smoke → production targets
 test/               # vitest: real SQLite for D1, fakes for Vectorize + Workers AI
 wrangler.jsonc
 ```
@@ -170,7 +207,7 @@ npx @modelcontextprotocol/inspector
 # URL: http://localhost:8787/mcp   Header: x-brain-key: dev-key
 ```
 
-## Deploy by hand (instead of the button)
+## Deploy by hand (without CI)
 
 ```bash
 npx wrangler login
@@ -179,7 +216,7 @@ npx wrangler secret put BRAIN_KEY
 npm run deploy                # wrangler deploy, then D1 migrations --remote
 ```
 
-`database_id` is left out of `wrangler.jsonc` on purpose: `wrangler deploy` creates the D1 database on whichever account deploys it.
+`database_id` is left out of `wrangler.jsonc` on purpose: wrangler finds the D1 database by its name (`david-brain`) on whichever account deploys, and creates it on the first deploy. That's what lets one config deploy to every account.
 
 ## Importing his markdown files (#9)
 
@@ -207,10 +244,11 @@ It checks: 401 with no key, a wrong key, or the key in the query string; all 6 t
 
 Already run against local `wrangler dev` (D1 only): auth, tools, KPIs, upsert, stats and week grouping all pass. The search checks need real Workers AI + Vectorize, so they only pass against a real deploy.
 
-Still to do on a real Cloudflare account (can't be done from CI):
+In CI, the staging job runs the smoke test on every merge and cleans up after (#16).
 
-- [ ] Deploy to Nate's free account (try the button; the repo is public now) and confirm D1 + Vectorize (768, cosine) exist and the migration ran
-- [ ] `npm run smoke` against the deployed URL: all PASS
+Still to do on a real Cloudflare account:
+
+- [ ] Set up the `staging` Environment and run the Deploy workflow: staging job green (this deploys, migrates and runs the smoke test). Confirm D1 + Vectorize (768, cosine) exist in Nate's dashboard
 - [ ] Connect as a custom connector, then on a phone: log 5 fake doors with mixed objections, drop in a real Rotor pin export, give hours + ARR, re-upload the same day, run `objection_stats` + `get_kpis` for the week. This tests Claude's side (tool descriptions, PDF reading, coaching), which the script can't.
 - [ ] `npm run smoke -- --doors 60`, then check Workers AI neurons in the dashboard (expect about 20 of 10,000)
-- [ ] Wipe the test data (or delete the Worker, D1 database and Vectorize index); do the fresh deploy on David's account Saturday
+- [ ] Saturday: `david` Environment + `PROD_TARGETS`, run the workflow, production job green

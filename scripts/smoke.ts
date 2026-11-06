@@ -4,6 +4,8 @@
  * Usage:
  *   BRAIN_KEY=... npm run smoke -- --url https://<worker>.workers.dev
  *   BRAIN_KEY=... npm run smoke -- --url https://<worker>.workers.dev --doors 60   # simulated full day
+ *   BRAIN_KEY=... npm run smoke -- --url https://<worker>.workers.dev --health     # steps 1-2 only, writes nothing
+ *   --cleanup-file <path>: also write the cleanup commands to a shell script (CI runs it after)
  *
  * What it checks (the same steps as the phone test, minus Claude):
  *   1. GET / answers; /mcp without the key or with a wrong key → 401
@@ -20,6 +22,7 @@
  * filtered by rep, so test doors could show up in his "similar doors". It prints the cleanup
  * commands at the end.
  */
+import { writeFileSync } from "node:fs";
 
 const REP = "smoke-test";
 // Each run uses its own random past week (a Monday in 2015-2024), so re-runs never see each other's data.
@@ -30,18 +33,20 @@ const SUNDAY = addDays(MONDAY, 6);
 const TOOLS = ["log_door", "objection_stats", "save_daily_kpis", "get_kpis", "save_note", "ask_brain"];
 
 function parseArgs(argv: string[]) {
-  const args = { url: process.env.BRAIN_URL ?? "", doors: 5 };
+  const args = { url: process.env.BRAIN_URL ?? "", doors: 5, health: false, cleanupFile: "" };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--url") args.url = argv[++i] ?? "";
     else if (argv[i] === "--doors") args.doors = Number(argv[++i]);
+    else if (argv[i] === "--health") args.health = true;
+    else if (argv[i] === "--cleanup-file") args.cleanupFile = argv[++i] ?? "";
   }
   return args;
 }
 
-const { url, doors: doorCount } = parseArgs(process.argv.slice(2));
+const { url, doors: doorCount, health, cleanupFile } = parseArgs(process.argv.slice(2));
 const key = process.env.BRAIN_KEY ?? "";
 if (!url || !key || !Number.isInteger(doorCount) || doorCount < 1) {
-  console.error("Usage: BRAIN_KEY=... npm run smoke -- --url https://<worker>.workers.dev [--doors 60]");
+  console.error("Usage: BRAIN_KEY=... npm run smoke -- --url https://<worker>.workers.dev [--doors 60] [--health] [--cleanup-file path]");
   process.exit(2);
 }
 const base = url.replace(/\/+$/, "");
@@ -110,8 +115,12 @@ async function main() {
   const names: string[] = (list.result?.tools ?? []).map((t: any) => t.name);
   check(TOOLS.every((t) => names.includes(t)), `tools/list: ${names.join(", ")}`);
 
+  if (health) {
+    console.log(`\n${failures === 0 ? "HEALTH CHECK PASSED" : `${failures} FAILED`} (--health: nothing was written)`);
+    process.exit(failures === 0 ? 0 : 1);
+  }
+
   console.log(`\n3. log_door × ${doorCount}`);
-  const doorIds: string[] = [];
   let searchWarnings = 0;
   let withSimilar = 0;
   for (let i = 0; i < doorCount; i++) {
@@ -170,6 +179,7 @@ async function main() {
     body: "When they say they just paid for gutters, offer front windows only as a smaller first job.",
     tags: ["smoke-test"],
   });
+  noteId = note.id;
   check(note.saved === true, `note saved (${note.id})`);
   if (note.index_warning) fail(`note warning: ${note.index_warning}`);
   await sleep(5000);
@@ -182,15 +192,31 @@ async function main() {
   }
 
   console.log(`\n${failures === 0 ? "ALL CHECKS PASSED" : `${failures} FAILED`}${warnings ? `, ${warnings} warning(s)` : ""}`);
-  console.log(`
-Cleanup (run from this repo, logged in to the same account):
-  npx wrangler d1 execute DB --remote --command "DELETE FROM doors WHERE rep='${REP}'; DELETE FROM daily_kpis WHERE rep='${REP}'; DELETE FROM notes WHERE id='${note.id}';"
-  npx wrangler vectorize delete-vectors david-brain-notes --ids ${[...doorIds.map((id) => `door:${id}`), `note:${note.id}#0`].join(" ")}
-Or, since David gets a fresh deploy anyway: delete the Worker, the D1 database and the Vectorize index from Nate's dashboard.`);
+  printCleanup();
   process.exit(failures === 0 ? 0 : 1);
+}
+
+// Test data this run wrote, so it can be cleaned up even if a later step crashed.
+const doorIds: string[] = [];
+let noteId: string | null = null;
+
+function cleanupCommands(): string[] {
+  const vectorIds = [...doorIds.map((id) => `door:${id}`), ...(noteId ? [`note:${noteId}#0`] : [])];
+  return [
+    // Deletes every smoke-test run's rows, not just this one's.
+    `npx wrangler d1 execute DB --remote --command "DELETE FROM doors WHERE rep='${REP}'; DELETE FROM daily_kpis WHERE rep='${REP}'; DELETE FROM notes WHERE tags LIKE '%\\"smoke-test\\"%';"`,
+    ...(vectorIds.length ? [`npx wrangler vectorize delete-vectors david-brain-notes --ids ${vectorIds.join(" ")}`] : []),
+  ];
+}
+
+function printCleanup() {
+  const cmds = cleanupCommands();
+  console.log(`\nCleanup (run from this repo, logged in to the same account):\n${cmds.map((c) => `  ${c}`).join("\n")}`);
+  if (cleanupFile) writeFileSync(cleanupFile, `#!/usr/bin/env bash\nset -euo pipefail\n${cmds.join("\n")}\n`);
 }
 
 main().catch((err) => {
   console.error(`\nFAIL  ${err instanceof Error ? err.message : String(err)}`);
+  printCleanup();
   process.exit(1);
 });
