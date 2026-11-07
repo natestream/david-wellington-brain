@@ -109,6 +109,12 @@ async function main() {
     body: JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method: "tools/list", params: {} }),
   });
   check(qs.status === 401, `key in query string → ${qs.status} (want 401)`);
+  const viaBearer = await fetch(`${base}/mcp`, {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${key}` },
+    body: JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method: "tools/list", params: {} }),
+  });
+  check(viaBearer.status === 200, `Authorization: Bearer → ${viaBearer.status} (want 200)`);
 
   console.log("\n2. Tools");
   const list = (await (await rpc("tools/list", {})).json()) as any;

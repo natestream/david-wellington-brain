@@ -31,6 +31,26 @@ describe("auth (#2)", () => {
     expect(res.status).toBe(401);
   });
 
+  const listReq = (url: string, headers: Record<string, string> = {}) =>
+    new Request(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+  it("accepts Authorization: Bearer <key> (what Claude's connector sends)", async () => {
+    const env = makeEnv();
+    const ok = await worker.fetch(listReq("https://brain.example/mcp", { authorization: `Bearer ${env.BRAIN_KEY}` }), env);
+    expect(ok.status).toBe(200);
+    const bad = await worker.fetch(listReq("https://brain.example/mcp", { authorization: "Bearer nope" }), env);
+    expect(bad.status).toBe(401);
+  });
+
+  it("never accepts the key in the path", async () => {
+    const env = makeEnv();
+    expect((await worker.fetch(listReq(`https://brain.example/mcp/${env.BRAIN_KEY}`), env)).status).toBe(404);
+  });
+
   it("protects /admin/import too", async () => {
     const env = makeEnv();
     const res = await worker.fetch(new Request("https://brain.example/admin/import", { method: "POST", body: "{}" }), env);
