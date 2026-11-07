@@ -13,12 +13,17 @@ export default {
       });
     }
 
-    if (pathname === "/mcp" || pathname === "/admin/import") {
+    // /mcp/<key>: the key in the path, for connectors that can't send a header.
+    const pathKeyMatch = pathname.match(/^\/mcp\/([^/]+)\/?$/);
+    const isMcp = pathname === "/mcp" || pathKeyMatch !== null;
+
+    if (isMcp || pathname === "/admin/import") {
       if (!env.BRAIN_KEY) {
         return new Response("Server not configured: set the BRAIN_KEY secret.\n", { status: 500 });
       }
-      if (!(await isAuthorized(request, env.BRAIN_KEY))) return unauthorized();
-      return pathname === "/mcp" ? handleMcp(request, env) : handleImport(request, env);
+      const pathKey = pathKeyMatch ? decodeURIComponent(pathKeyMatch[1]!) : undefined;
+      if (!(await isAuthorized(request, env.BRAIN_KEY, pathKey))) return unauthorized();
+      return isMcp ? handleMcp(request, env) : handleImport(request, env);
     }
 
     return new Response("Not found\n", { status: 404 });

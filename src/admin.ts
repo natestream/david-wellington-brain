@@ -4,7 +4,7 @@ import { storeNotes } from "./tools/notes";
 
 /**
  * POST /admin/import: used once by scripts/import.ts to load David's markdown files.
- * Same x-brain-key auth as /mcp, so it adds no access the MCP tools don't already give.
+ * Same key auth as /mcp, so it adds no access the MCP tools don't already give.
  *
  * Each note's id is derived from its file path, so re-running the import replaces
  * notes instead of duplicating them.

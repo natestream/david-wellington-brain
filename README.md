@@ -44,7 +44,7 @@ In the account's Cloudflare dashboard: **My Profile → API Tokens → Create To
 2. He creates the API token (above) while you watch, and reads you his account ID.
 3. You create the `david` Environment with his token, account ID and a fresh `BRAIN_KEY` (save it in his password manager), and set `PROD_TARGETS` to `["david"]`.
 4. **Actions → Deploy → Run workflow**. When the production job is green, its log shows his URL.
-5. In Claude: **Settings → Connectors → Add custom connector**. URL `https://<worker>.<his-subdomain>.workers.dev/mcp`, request header `x-brain-key: <BRAIN_KEY>`.
+5. In Claude: **Settings → Connectors → Add custom connector**, URL `https://<worker>.<his-subdomain>.workers.dev/mcp/<BRAIN_KEY>`, no header. Claude only allows approved custom header names, so the key goes in the path. Where a client can set headers, use `/mcp` with `Authorization: Bearer <BRAIN_KEY>` instead. Treat the full URL like a password.
 6. Test: *"Log a door: no answer on Main St."*
 
 David is on Claude Free, which allows one custom connector. He has none yet, so this one fits.
