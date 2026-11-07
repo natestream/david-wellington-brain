@@ -8,13 +8,13 @@ const TOOLS = ["ask_brain", "get_kpis", "log_door", "objection_stats", "save_dai
 describe("auth (#2)", () => {
   it("rejects a request with no header with a real 401", async () => {
     const env = makeEnv();
-    const res = await rpc(env, "tools/list", {}, { "x-brain-key": "" });
+    const res = await rpc(env, "tools/list", {}, { "x-api-key": "" });
     expect(res.status).toBe(401);
   });
 
   it("rejects a wrong key", async () => {
     const env = makeEnv();
-    const res = await rpc(env, "tools/list", {}, { "x-brain-key": "nope" });
+    const res = await rpc(env, "tools/list", {}, { "x-api-key": "nope" });
     expect(res.status).toBe(401);
   });
 
@@ -31,6 +31,26 @@ describe("auth (#2)", () => {
     expect(res.status).toBe(401);
   });
 
+  const listReq = (url: string, headers: Record<string, string> = {}) =>
+    new Request(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...headers },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+  it("accepts Authorization: Bearer <key>", async () => {
+    const env = makeEnv();
+    const ok = await worker.fetch(listReq("https://brain.example/mcp", { authorization: `Bearer ${env.BRAIN_KEY}` }), env);
+    expect(ok.status).toBe(200);
+    const bad = await worker.fetch(listReq("https://brain.example/mcp", { authorization: "Bearer nope" }), env);
+    expect(bad.status).toBe(401);
+  });
+
+  it("never accepts the key in the path", async () => {
+    const env = makeEnv();
+    expect((await worker.fetch(listReq(`https://brain.example/mcp/${env.BRAIN_KEY}`), env)).status).toBe(404);
+  });
+
   it("protects /admin/import too", async () => {
     const env = makeEnv();
     const res = await worker.fetch(new Request("https://brain.example/admin/import", { method: "POST", body: "{}" }), env);
@@ -39,7 +59,7 @@ describe("auth (#2)", () => {
 
   it("refuses everything when BRAIN_KEY is not set", async () => {
     const env = makeEnv("");
-    const res = await rpc(env, "tools/list", {}, { "x-brain-key": "" });
+    const res = await rpc(env, "tools/list", {}, { "x-api-key": "" });
     expect(res.status).toBe(500);
   });
 

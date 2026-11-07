@@ -1,12 +1,17 @@
 /**
- * Header auth: `x-brain-key` must match the BRAIN_KEY secret.
- * The key is never accepted as a query parameter (it would leak into URL logs).
+ * Header auth: the BRAIN_KEY secret, sent as `x-api-key: <key>` (what Claude's connector sends)
+ * or `Authorization: Bearer <key>`. The key is never accepted in the URL (it would leak into logs).
  */
 export async function isAuthorized(request: Request, secret: string | undefined): Promise<boolean> {
   if (!secret) return false;
-  const provided = request.headers.get("x-brain-key");
+  const provided = request.headers.get("x-api-key") || bearer(request);
   if (!provided) return false;
   return timingSafeEqualStrings(provided, secret);
+}
+
+function bearer(request: Request): string | null {
+  const m = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i);
+  return m ? m[1]!.trim() : null;
 }
 
 /** Compare SHA-256 digests in constant time so the comparison doesn't leak the key length or prefix. */
@@ -24,8 +29,8 @@ async function timingSafeEqualStrings(a: string, b: string): Promise<boolean> {
 }
 
 export function unauthorized(): Response {
-  return new Response(JSON.stringify({ error: "unauthorized", hint: "Send the x-brain-key header." }), {
+  return new Response(JSON.stringify({ error: "unauthorized", hint: "Send the x-api-key header." }), {
     status: 401,
-    headers: { "content-type": "application/json", "www-authenticate": 'Header realm="x-brain-key"' },
+    headers: { "content-type": "application/json", "www-authenticate": 'Bearer realm="brain"' },
   });
 }
