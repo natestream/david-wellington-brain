@@ -1,7 +1,6 @@
 name: CI
+# PR checks. Merges to main are checked again by deploy.yml before anything deploys.
 on:
-  push:
-    branches: [main]
   pull_request:
 jobs:
   check:
