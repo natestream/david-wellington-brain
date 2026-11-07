@@ -124,18 +124,41 @@ David uses [Rotor](https://getrotor.com/), a CRM for window cleaning and exterio
 
 **v1 (this build):** he drops in the Rotor **"New Pins by Team Member"** export (CSV, PDF or screenshot; columns: Team Member, Total, Gave Pitch, Go Back, Never Knock, Door Hanger, No Answer, Not Interested, Made Sale). Claude saves **David's row only** and ignores teammates' rows (teammates are out of scope for v1). It then asks for hours knocked and ARR sold, which aren't on the export.
 
-**Rotor has a public API** ([docs](https://docs.api.getrotor.com/), [setup](https://rotor.stldocs.app/)), so a later version can pull the pin counts itself with `source: "crm"`. From the docs index (not yet verified against a real account):
+### v2: Rotor sync (optional, off by default)
 
-- Base URL `https://api.getrotor.com/open-api/`, key in the `x-api-key` header plus a version header (`1.1.0`). `GET /open-api/auth/test` checks the key and lists its scopes.
-- Key: **Rotor → Settings → Integrations → API**: name it, pick permissions, optional expiry. It's shown once.
-- Endpoints: Leads, Customers (list, create/update), Service Plans, Serviced Jobs, **Pins** and **Pin Types**.
-- Limit: 1,000 requests/day by default. The docs hint that access may need to be requested.
+With a Rotor API key set, the brain pulls David's day from Rotor itself, so he doesn't have to drop in the export. Without the key, nothing changes and the export flow above still works.
 
-v2 idea: a `sync_rotor_day` tool that lists a day's pins, counts them per rep and pin type (the same numbers as the export), and saves them with `source: "crm"`. Hours and ARR would still come from the rep, unless service plans in the API carry the ARR.
+**What it pulls** (from the [Rotor OpenAPI](https://docs.api.getrotor.com/), v1.1.0):
 
-**v2 backlog:**
-- **Rotor API sync** (Nate is looking into the API): confirm the Pins response fields, then add `sync_rotor_day`. Needs David's Rotor plan to include API access and a read-only key, stored as a Worker secret `ROTOR_API_KEY` (never in the repo).
-- **Teammates:** save every rep's row from the export (lowercase-hyphenated names, e.g. `jane-doe`), let reps log doors, and compare reps in `get_kpis`. The server already supports `rep` on every tool, so this is mostly tool descriptions plus a decision on whether reps get their own connector/key.
+| KPI input | Rotor source |
+|---|---|
+| The 8 pin counts | `GET /pins`: his pins created that LA day, counted by `pin_type.label` (`"Go Back"` → `go_back`, and so on). Pin types not in the guide count toward Total only, with a warning. |
+| `hours_knocked` | `GET /timesheets`: his timesheets in the `sales` category that started that day (`duration_minutes`). Office/service time isn't counted. |
+| `arr_sold` | `GET /service-plans`: plans he sold that day (`sold_by`), not cancelled. `sale_value` is the whole contract, so ARR per plan = (`sale_value` ÷ jobs) × visits per year from `service_frequency`, capped at `sale_value`. One-Time = full value. A `Custom` frequency or a missing job count leaves ARR blank and Claude asks. |
+
+**How it runs:**
+
+- A **nightly cron** at 05:30 UTC (9:30 pm PST / 10:30 pm PDT) saves that day automatically.
+- A **`sync_rotor_day`** tool pulls a day on demand ("sync my day", or before "how did I do?"). It only appears when the secrets are set.
+- Pin counts always come from Rotor. Hours and ARR **only fill blanks**, so numbers David entered himself are never overwritten.
+- A day with nothing for him in Rotor saves nothing, so an export he already saved isn't wiped.
+- About 3 requests per day out of the 1,000/day limit.
+
+**Turn it on** (David is on Rotor Pro; the docs say API access "may come at additional cost depending on your plan", so check that the Integrations page offers API keys):
+
+1. In Rotor: **Settings → Integrations → API Keys**. Create a key with only `pins:read`, `timesheets:read` and `service_plans:read`. It's shown once.
+2. On the Worker: `npx wrangler secret put ROTOR_API_KEY` (the key) and `npx wrangler secret put ROTOR_REP_EMAIL` (David's Rotor login email). Or add both under the Worker's **Settings → Variables and Secrets** in the Cloudflare dashboard.
+3. In Claude: *"Sync my day from Rotor."* Compare the result with that day's export once.
+
+Why not Rotor's own MCP server (`https://mcp.getrotor.com/mcp`, which has `summarize_map_pin_activity` and timesheets)? Claude Free allows one custom connector, and that has to be the brain. Calling the REST API from the Worker gives the same data through the one connector.
+
+**To verify on a real key** (couldn't be done from the build sandbox):
+
+- [ ] `sync_rotor_day` for a past day matches that day's "New Pins by Team Member" export row exactly. If not, check whether the export counts pins by creator or by assignee, and whether a pin's type changes after it's created (the API returns the current type).
+- [ ] Timesheet categories: confirm he clocks in as `sales` while knocking.
+- [ ] ARR: compare a few plans' computed ARR with what he'd enter by hand.
+
+**Still in the backlog:** teammates (save every rep's row, let reps log doors, compare reps). The server already supports `rep` on every tool.
 
 Door outcomes use Rotor's pin types, so logged doors compare 1:1 with the export. Outcome and objection categories live in `OUTCOMES` / `OBJECTION_TYPES` in `src/tools/doors.ts` and in the `CHECK` constraints in the migration; change both together.
 
@@ -150,12 +173,14 @@ src/
     doors.ts        # log_door, objection_stats
     kpis.ts         # save_daily_kpis, get_kpis (KPI_FIELDS + computeKpis live here)
     notes.ts        # save_note, ask_brain
+    rotor.ts        # v2: sync_rotor_day + nightly sync (off without ROTOR_API_KEY)
   lib/
     auth.ts         # x-brain-key check (constant-time), 401
     embed.ts        # Workers AI embedding helper
     vectors.ts      # Vectorize upsert/query + D1 hydration
     chunk.ts        # note chunking for embeddings
-    dates.ts        # today() in America/Los_Angeles
+    dates.ts        # today() and LA day ranges in America/Los_Angeles
+    rotor.ts        # v2: read-only Rotor OpenAPI client
 migrations/
   0001_init.sql
 scripts/
@@ -231,7 +256,7 @@ This week's doors (Wed/Thu, before setup): paste his notes into Claude and say *
 
 ## Testing before the demo (#11)
 
-Covered by `npm test` (45 tests): auth/401, tool listing, every tool's SQL, upsert-not-duplicate, the 6 KPIs checked by hand against David's guide, divide-by-zero, week grouping, similar-door search, chunking, import idempotency, embedding failures.
+Covered by `npm test` (60 tests): auth/401, tool listing, every tool's SQL, upsert-not-duplicate, the 6 KPIs checked by hand against David's guide, divide-by-zero, week grouping, similar-door search, chunking, import idempotency, embedding failures, and the Rotor sync against documented API response shapes.
 
 `npm run smoke` runs the same flow against a live Worker (the deployed URL or `wrangler dev`):
 
