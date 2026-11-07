@@ -44,7 +44,7 @@ In the account's Cloudflare dashboard: **My Profile → API Tokens → Create To
 2. He creates the API token (above) while you watch, and reads you his account ID.
 3. You create the `david` Environment with his token, account ID and a fresh `BRAIN_KEY` (save it in his password manager), and set `PROD_TARGETS` to `["david"]`.
 4. **Actions → Deploy → Run workflow**. When the production job is green, its log shows his URL.
-5. In Claude: **Settings → Connectors → Add custom connector**. URL `https://<worker>.<his-subdomain>.workers.dev/mcp`, request header name `Authorization`, value `Bearer <BRAIN_KEY>` (Claude only allows approved custom header names, so not `x-brain-key`). The key never goes in the URL.
+5. In Claude: **Settings → Connectors → Add custom connector**. URL `https://<worker>.<his-subdomain>.workers.dev/mcp`, request header `x-api-key: <BRAIN_KEY>` (Claude only allows approved custom header names; `x-api-key` is one). The key never goes in the URL.
 6. Test: *"Log a door: no answer on Main St."*
 
 David is on Claude Free, which allows one custom connector. He has none yet, so this one fits.
@@ -151,7 +151,7 @@ src/
     kpis.ts         # save_daily_kpis, get_kpis (KPI_FIELDS + computeKpis live here)
     notes.ts        # save_note, ask_brain
   lib/
-    auth.ts         # x-brain-key check (constant-time), 401
+    auth.ts         # x-api-key check (constant-time), 401
     embed.ts        # Workers AI embedding helper
     vectors.ts      # Vectorize upsert/query + D1 hydration
     chunk.ts        # note chunking for embeddings
@@ -171,7 +171,7 @@ wrangler.jsonc
 
 ## Conventions
 
-- **Auth:** require the `x-brain-key` header matching the `BRAIN_KEY` secret. HTTP 401 otherwise. The key is never accepted as a query param.
+- **Auth:** require the `x-api-key` header matching the `BRAIN_KEY` secret. HTTP 401 otherwise. The key is never accepted as a query param.
 - **Dates:** `YYYY-MM-DD` in America/Los_Angeles. Default to today.
 - **IDs:** `crypto.randomUUID()`. Imported notes use an id derived from the file path so re-imports replace instead of duplicating.
 - **No PDF storage:** extract the numbers, discard the file.
@@ -204,7 +204,7 @@ Inspect the tools:
 
 ```bash
 npx @modelcontextprotocol/inspector
-# URL: http://localhost:8787/mcp   Header: x-brain-key: dev-key
+# URL: http://localhost:8787/mcp   Header: x-api-key: dev-key
 ```
 
 ## Deploy by hand (without CI)

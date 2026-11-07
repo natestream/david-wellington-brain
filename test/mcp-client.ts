@@ -11,7 +11,7 @@ export async function rpc(env: Env, method: string, params: unknown = {}, header
       headers: {
         "content-type": "application/json",
         accept: "application/json, text/event-stream",
-        "x-brain-key": env.BRAIN_KEY,
+        "x-api-key": env.BRAIN_KEY,
         ...headers,
       },
       body: JSON.stringify({ jsonrpc: "2.0", id: nextId++, method, params }),

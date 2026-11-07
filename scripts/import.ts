@@ -9,7 +9,7 @@
  * - Skips hidden folders (.obsidian, .trash, .git), non-markdown files and empty files.
  * - Long files are split into chunks on the server (one vector per chunk).
  * - Safe to re-run: each note's id comes from its path, so a re-run replaces, never duplicates.
- * - Sends 25 files per request to POST /admin/import with the x-brain-key header.
+ * - Sends 25 files per request to POST /admin/import with the x-api-key header.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
@@ -66,7 +66,7 @@ async function post(url: string, key: string, notes: FileNote[]): Promise<{ impo
   for (let attempt = 1; ; attempt++) {
     const res = await fetch(`${url.replace(/\/+$/, "")}/admin/import`, {
       method: "POST",
-      headers: { "content-type": "application/json", "x-brain-key": key },
+      headers: { "content-type": "application/json", "x-api-key": key },
       body: JSON.stringify({ notes }),
     });
     if (res.ok) return (await res.json()) as { imported: number; chunks: number };

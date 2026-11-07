@@ -66,7 +66,7 @@ async function rpc(method: string, params: unknown, headerKey: string | null = k
     "content-type": "application/json",
     accept: "application/json, text/event-stream",
   };
-  if (headerKey !== null) headers["x-brain-key"] = headerKey;
+  if (headerKey !== null) headers["x-api-key"] = headerKey;
   return fetch(`${base}/mcp`, {
     method: "POST",
     headers,
@@ -103,7 +103,7 @@ async function main() {
     const res = await rpc("tools/list", {}, k);
     check(res.status === 401, `${label} → ${res.status} (want 401)`);
   }
-  const qs = await fetch(`${base}/mcp?x-brain-key=${encodeURIComponent(key)}`, {
+  const qs = await fetch(`${base}/mcp?x-api-key=${encodeURIComponent(key)}`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
     body: JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method: "tools/list", params: {} }),
