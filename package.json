@@ -12,7 +12,8 @@
     "setup:vectorize": "wrangler vectorize create david-brain-notes --dimensions=768 --metric=cosine",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
     "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
-    "import": "tsx scripts/import.ts"
+    "import": "tsx scripts/import.ts",
+    "smoke": "tsx scripts/smoke.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",

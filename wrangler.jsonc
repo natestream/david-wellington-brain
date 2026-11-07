@@ -20,11 +20,15 @@
 
   // Vectorize: semantic search over doors and notes.
   // Must be 768 dimensions, cosine (matches @cf/baai/bge-base-en-v1.5).
+  // dimensions + metric are for the Deploy to Cloudflare button, which creates the index.
+  // Wrangler 4.157/4.158 warns "Unexpected fields" about them; that warning is harmless.
   // `remote: true` makes `wrangler dev` use the real index (it can't run locally).
   "vectorize": [
     {
       "binding": "VECTORS",
       "index_name": "david-brain-notes",
+      "dimensions": 768,
+      "metric": "cosine",
       "remote": true
     }
   ],
