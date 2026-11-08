@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { makeEnv } from "./fakes";
 import { rpc } from "./mcp-client";
@@ -51,6 +51,25 @@ describe("auth (#2)", () => {
   it("never accepts the key in the path", async () => {
     const env = makeEnv();
     expect((await worker.fetch(listReq(`https://brain.example/mcp/${env.BRAIN_KEY}`), env)).status).toBe(404);
+  });
+
+  it("logs why a request was refused, without logging any key", async () => {
+    const env = makeEnv("the-real-key");
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "warn").mockImplementation((m: string) => void logs.push(m));
+    try {
+      await rpc(env, "tools/list", {}, { "x-api-key": "" });
+      await rpc(env, "tools/list", {}, { "x-api-key": '"wrong key"' });
+    } finally {
+      spy.mockRestore();
+    }
+    const [none, wrong] = logs.map((l) => JSON.parse(l));
+    expect(none).toMatchObject({ event: "auth_failed", reason: "no_key_header", path: "/mcp" });
+    expect(wrong).toMatchObject({ reason: "wrong_key", sent: { via: "x-api-key", length: 11, has_quotes: true, has_spaces: true } });
+    expect(wrong.expected.length).toBe(12);
+    expect(wrong.sent.sha256_8).not.toBe(wrong.expected.sha256_8);
+    expect(logs.join("")).not.toContain("the-real-key");
+    expect(logs.join("")).not.toContain("wrong key");
   });
 
   it("protects /admin/import too", async () => {
