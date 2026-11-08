@@ -28,9 +28,13 @@ async function timingSafeEqualStrings(a: string, b: string): Promise<boolean> {
   return diff === 0;
 }
 
+/**
+ * No `www-authenticate` header on purpose: under the MCP spec it tells Claude to start an OAuth
+ * sign-in, which this server doesn't offer, so reconnecting the connector fails.
+ */
 export function unauthorized(): Response {
   return new Response(JSON.stringify({ error: "unauthorized", hint: "Send the x-api-key header." }), {
     status: 401,
-    headers: { "content-type": "application/json", "www-authenticate": 'Bearer realm="brain"' },
+    headers: { "content-type": "application/json" },
   });
 }
