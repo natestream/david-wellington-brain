@@ -4,11 +4,14 @@
 # GitHub holds one secret per Environment: DOPPLER_TOKEN, a read-only service token for that
 # target's CI config (e.g. `staging_ci`). Everything else comes from Doppler at run time, no sync:
 #
+# From the CI config (e.g. `staging_ci`):
 #   CLOUDFLARE_API_TOKEN   deploys to that Cloudflare account
 #   CLOUDFLARE_ACCOUNT_ID  that account
-#   BRAIN_KEY              the connector key (the smoke test uses it)
-#   WORKER_DOPPLER_TOKEN   read-only service token for the config that holds only BRAIN_KEY
+#   WORKER_DOPPLER_TOKEN   read-only service token for the config that holds BRAIN_KEY
 #                          (e.g. `staging`); the deploy gives it to the Worker (#21)
+# Then, with WORKER_DOPPLER_TOKEN, exactly as the Worker does:
+#   BRAIN_KEY              the connector key (the smoke test uses it). It lives only in `staging`,
+#                          so the CI config needs no copy and doesn't have to inherit it.
 #
 # Each value is masked in the logs, then exported to the next steps via $GITHUB_ENV.
 set -euo pipefail
@@ -26,18 +29,27 @@ json="$(curl -fsS --retry 3 --max-time 15 \
 DOPPLER_JSON="$json" node --input-type=module -e '
 import { appendFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-const s = JSON.parse(process.env.DOPPLER_JSON);
-const required = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "BRAIN_KEY", "WORKER_DOPPLER_TOKEN"];
-const missing = required.filter((k) => typeof s[k] !== "string" || s[k].trim() === "");
-if (missing.length) {
-  console.log(`::error::Missing in Doppler: ${missing.join(", ")}`);
-  process.exit(1);
-}
-for (const k of required) {
-  const v = s[k].trim();
+
+const URL = "https://api.doppler.com/v3/configs/config/secrets/download?format=json";
+const fail = (msg) => { console.log(`::error::${msg}`); process.exit(1); };
+const str = (v) => (typeof v === "string" ? v.trim() : "");
+
+const ci = JSON.parse(process.env.DOPPLER_JSON);
+const fromCi = ["CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "WORKER_DOPPLER_TOKEN"];
+const missing = fromCi.filter((k) => !str(ci[k]));
+if (missing.length) fail(`Missing in the CI config (the one DOPPLER_TOKEN belongs to): ${missing.join(", ")}`);
+const out = Object.fromEntries(fromCi.map((k) => [k, str(ci[k])]));
+
+// BRAIN_KEY: read with the Worker token, the same way the server reads it.
+const res = await fetch(URL, { headers: { authorization: `Bearer ${out.WORKER_DOPPLER_TOKEN}`, accept: "application/json" } });
+if (!res.ok) fail(`Doppler refused WORKER_DOPPLER_TOKEN (HTTP ${res.status}). It should be a service token for the config that holds BRAIN_KEY (e.g. staging).`);
+out.BRAIN_KEY = str((await res.json()).BRAIN_KEY);
+if (!out.BRAIN_KEY) fail("BRAIN_KEY is missing in the config WORKER_DOPPLER_TOKEN belongs to (e.g. staging).");
+
+for (const [k, v] of Object.entries(out)) {
   for (const line of v.split("\n")) if (line) console.log(`::add-mask::${line}`);
   const eof = `EOF_${randomUUID()}`;
   appendFileSync(process.env.GITHUB_ENV, `${k}<<${eof}\n${v}\n${eof}\n`);
 }
-console.log(`Loaded from Doppler: ${required.join(", ")}`);
+console.log(`Loaded from Doppler: ${Object.keys(out).join(", ")}`);
 '
