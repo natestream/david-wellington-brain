@@ -4,8 +4,10 @@
 # Each target is a GitHub Environment (Settings → Environments) with ONE secret: DOPPLER_TOKEN,
 # a read-only Doppler service token for that target's CI config. Every other key lives in Doppler and
 # is fetched at run time by scripts/doppler-env.sh (no sync). See README "All keys live in Doppler".
-# Production targets come from the repo variable PROD_TARGETS, e.g. ["david"].
-# Leave it unset and only staging deploys. A new client = a new Environment + one entry.
+# Production targets come from the repo variable PROD_TARGETS, e.g. ["production"]. Each entry is
+# both a GitHub Environment and a wrangler env (wrangler.jsonc "env"), on the same Cloudflare account.
+# Leave it unset and only staging deploys. Add "Required reviewers" to the Environment so each
+# production deploy waits for your Approve.
 name: Deploy
 
 on:
@@ -69,6 +71,7 @@ jobs:
     environment: ${{ matrix.target }}
     env:
       DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+      WRANGLER_ENV: ${{ matrix.target }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -80,5 +83,5 @@ jobs:
       - run: npm ci
       - id: deploy
         run: scripts/ci-deploy.sh
-      - name: Health check (read-only, no test data on a real account)
+      - name: Health check (read-only, never writes to David's brain)
         run: npm run smoke -- --url "${{ steps.deploy.outputs.url }}" --health

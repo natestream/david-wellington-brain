@@ -1,0 +1,48 @@
+# Empty the STAGING brain (Nate's account) so testing starts from scratch.
+# Actions → "Reset staging" → Run workflow → type RESET.
+#
+# Deletes all doors, KPIs and notes, and every vector in the search index. Keeps the schema,
+# the index and the sign-in store, so Claude stays connected.
+# Pinned to the `staging` Environment: it can never reach David's account.
+name: Reset staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type RESET to permanently delete all staging test data"
+        required: true
+
+# Never at the same time as a deploy.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    environment: staging
+    env:
+      DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
+      RESET_TARGET: staging
+      RESET_CONFIRM: ${{ inputs.confirm }}
+    steps:
+      - name: Check confirmation
+        run: |
+          if [ "$RESET_CONFIRM" != "RESET" ]; then
+            echo "::error::Type RESET (all caps) in the confirm box to wipe staging."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Load keys from Doppler
+        run: scripts/doppler-env.sh
+      - run: npm ci
+      - name: Empty the staging brain
+        run: npx tsx scripts/reset-staging.ts

@@ -39,7 +39,36 @@
   "kv_namespaces": [{ "binding": "OAUTH_KV" }],
 
   // Workers AI: embeddings only. No other model is called by the server.
-  "ai": { "binding": "AI", "remote": true }
+  "ai": { "binding": "AI", "remote": true },
 
   // Secret (not in this file): DOPPLER_TOKEN. Every other secret is read from Doppler at runtime.
+
+  // The settings above are STAGING (Nate's testing, `wrangler deploy` with no --env).
+  // PRODUCTION is David's brain, on the same Cloudflare account but fully separate:
+  // its own Worker, database, search index and sign-in store. Deployed with `--env production`,
+  // only after Nate approves the deploy in GitHub Actions.
+  // Bindings aren't inherited by environments, so they're repeated here with production names.
+  "env": {
+    "production": {
+      "name": "david-brain",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "david-brain-prod",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "vectorize": [
+        {
+          "binding": "VECTORS",
+          "index_name": "david-brain-notes-prod",
+          "dimensions": 768,
+          "metric": "cosine",
+          "remote": true
+        }
+      ],
+      "kv_namespaces": [{ "binding": "OAUTH_KV" }],
+      "ai": { "binding": "AI", "remote": true }
+    }
+  }
 }
