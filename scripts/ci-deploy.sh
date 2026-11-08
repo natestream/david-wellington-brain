@@ -15,8 +15,15 @@ set -euo pipefail
 : "${CLOUDFLARE_ACCOUNT_ID:?set CLOUDFLARE_ACCOUNT_ID}"
 : "${WORKER_DOPPLER_TOKEN:?set WORKER_DOPPLER_TOKEN (in Doppler)}"
 
-DB_NAME="david-brain"
-INDEX_NAME="david-brain-notes"
+# WRANGLER_ENV picks the Worker (wrangler.jsonc): unset = staging, "production" = David's brain.
+# Both live on the same Cloudflare account, each with its own database, index and sign-in store.
+ENV_ARGS=()
+case "${WRANGLER_ENV:-}" in
+  "")         DB_NAME="david-brain";      INDEX_NAME="david-brain-notes";      ENV_ARGS=(--env=) ;;
+  production) DB_NAME="david-brain-prod"; INDEX_NAME="david-brain-notes-prod"; ENV_ARGS=(--env production) ;;
+  *) echo "Unknown WRANGLER_ENV '${WRANGLER_ENV}' (want empty or production)" >&2; exit 1 ;;
+esac
+echo "Target: ${WRANGLER_ENV:-staging} (database ${DB_NAME}, index ${INDEX_NAME})"
 wrangler() { npx --no-install wrangler "$@"; }
 
 echo "::group::D1 database ${DB_NAME}"
@@ -37,7 +44,7 @@ fi
 echo "::endgroup::"
 
 echo "::group::D1 migrations"
-wrangler d1 migrations apply DB --remote
+wrangler d1 migrations apply DB --remote "${ENV_ARGS[@]}"
 echo "::endgroup::"
 
 echo "::group::Deploy"
@@ -47,7 +54,7 @@ trap 'rm -f "$secrets" "$log"' EXIT
 # Only the read-only token for the BRAIN_KEY config goes on the Worker, never the CI token, so the
 # running server can't read the Cloudflare credentials. Any BRAIN_KEY secret on it is ignored.
 node -e 'process.stdout.write(JSON.stringify({ DOPPLER_TOKEN: process.env.WORKER_DOPPLER_TOKEN }))' > "$secrets"
-wrangler deploy --secrets-file "$secrets" 2>&1 | tee "$log"
+wrangler deploy "${ENV_ARGS[@]}" --secrets-file "$secrets" 2>&1 | tee "$log"
 echo "::endgroup::"
 
 url="$(grep -oE 'https://[a-z0-9.-]+\.workers\.dev' "$log" | head -1 || true)"
