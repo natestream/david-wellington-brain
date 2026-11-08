@@ -3,24 +3,34 @@ import type { Env } from "./env";
 import { isAuthorized, unauthorized } from "./lib/auth";
 import { getBrainKey } from "./lib/keystore";
 import { handleMcp } from "./mcp";
+import { oauthProvider } from "./oauth";
 
+/**
+ * Two ways in:
+ * - Claude's connector: Google sign-in (OAuth, src/oauth.ts). /mcp needs the token it issues.
+ * - Scripts (smoke test, import): the `x-api-key` header with BRAIN_KEY, on /mcp and /admin/import.
+ */
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
-    const { pathname } = new URL(request.url);
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const url = new URL(request.url);
 
-    if (pathname === "/" && request.method === "GET") {
-      return new Response("David Wellington Brain is running. MCP endpoint: /mcp\n", {
-        headers: { "content-type": "text/plain; charset=utf-8" },
-      });
+    if (url.pathname === "/" && request.method === "GET") {
+      return new Response(
+        "David Wellington Brain is running.\nIn Claude: Settings → Connectors → Add custom connector → " +
+          `${url.origin}/mcp → Connect, then sign in with Google.\n`,
+        { headers: { "content-type": "text/plain; charset=utf-8" } },
+      );
     }
 
-    if (pathname === "/mcp" || pathname === "/admin/import") {
+    const scriptCall =
+      url.pathname === "/admin/import" || (url.pathname === "/mcp" && request.headers.has("x-api-key"));
+    if (scriptCall) {
       const brainKey = await getBrainKey(env);
       if (!brainKey.ok) return new Response(`${brainKey.error}\n`, { status: brainKey.status });
       if (!(await isAuthorized(request, brainKey.key))) return unauthorized();
-      return pathname === "/mcp" ? handleMcp(request, env) : handleImport(request, env);
+      return url.pathname === "/mcp" ? handleMcp(request, env) : handleImport(request, env);
     }
 
-    return new Response("Not found\n", { status: 404 });
+    return oauthProvider(url.origin).fetch(request, env, ctx);
   },
 } satisfies ExportedHandler<Env>;

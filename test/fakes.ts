@@ -123,10 +123,57 @@ function cosine(a: number[], b: number[]): number {
   return na && nb ? dot / Math.sqrt(na * nb) : 0;
 }
 
+/** In-memory Workers KV: get (text/json), put (expirationTtl, metadata), delete, list (prefix, metadata). */
+export class FakeKV {
+  store = new Map<string, { value: string; expires?: number; metadata?: unknown }>();
+  private live(key: string) {
+    const e = this.store.get(key);
+    if (e?.expires && e.expires <= Date.now()) {
+      this.store.delete(key);
+      return undefined;
+    }
+    return e;
+  }
+  async get(key: string, opts?: "text" | "json" | { type?: string }) {
+    const e = this.live(key);
+    if (!e) return null;
+    const type = typeof opts === "string" ? opts : opts?.type;
+    return type === "json" ? JSON.parse(e.value) : e.value;
+  }
+  async getWithMetadata(key: string, opts?: "text" | "json" | { type?: string }) {
+    const e = this.live(key);
+    return { value: e ? await this.get(key, opts) : null, metadata: e?.metadata ?? null };
+  }
+  async put(key: string, value: string, opts?: { expirationTtl?: number; expiration?: number; metadata?: unknown }) {
+    const expires = opts?.expirationTtl
+      ? Date.now() + opts.expirationTtl * 1000
+      : opts?.expiration
+        ? opts.expiration * 1000
+        : undefined;
+    this.store.set(key, { value: String(value), expires, metadata: opts?.metadata });
+  }
+  async delete(key: string) {
+    this.store.delete(key);
+  }
+  async list(opts?: { prefix?: string; limit?: number; cursor?: string }) {
+    const names = [...this.store.keys()].filter((k) => k.startsWith(opts?.prefix ?? "") && this.live(k)).sort();
+    const start = opts?.cursor ? Number(opts.cursor) : 0;
+    const limit = opts?.limit ?? 1000;
+    const page = names.slice(start, start + limit);
+    const done = start + limit >= names.length;
+    return {
+      keys: page.map((name) => ({ name, metadata: this.store.get(name)?.metadata })),
+      list_complete: done,
+      cursor: done ? undefined : String(start + limit),
+    };
+  }
+}
+
 export interface TestEnv extends Env {
   DB: FakeD1 & D1Database;
   VECTORS: FakeVectorize & VectorizeIndex;
   AI: FakeAI & Ai;
+  OAUTH_KV: FakeKV & KVNamespace;
 }
 
 export function makeEnv(key = "test-key"): TestEnv {
@@ -134,6 +181,17 @@ export function makeEnv(key = "test-key"): TestEnv {
     DB: new FakeD1() as TestEnv["DB"],
     VECTORS: new FakeVectorize() as unknown as TestEnv["VECTORS"],
     AI: new FakeAI() as unknown as TestEnv["AI"],
+    OAUTH_KV: new FakeKV() as unknown as TestEnv["OAUTH_KV"],
     BRAIN_KEY: key,
-  };
+  } as TestEnv; // OAUTH_PROVIDER is set by the OAuth library per request
+}
+
+/** A minimal ExecutionContext for worker.fetch in tests. */
+export function makeCtx(): ExecutionContext {
+  const pending: Promise<unknown>[] = [];
+  return {
+    waitUntil: (p: Promise<unknown>) => void pending.push(p),
+    passThroughOnException: () => {},
+    props: {},
+  } as unknown as ExecutionContext;
 }

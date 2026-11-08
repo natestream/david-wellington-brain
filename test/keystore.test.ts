@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
 import { CACHE_MS, DOPPLER_URL, getBrainKey, resetKeyCache } from "../src/lib/keystore";
-import { makeEnv } from "./fakes";
+import { makeCtx, makeEnv } from "./fakes";
 
 /** A fake Doppler: answers the secrets download with whatever `key` is now, or fails when `down`. */
 function fakeDoppler(initial: string) {
@@ -34,8 +34,8 @@ describe("key from Doppler (#21)", () => {
   it("reads BRAIN_KEY from Doppler with the service token, and ignores BRAIN_KEY in the env", async () => {
     const doppler = fakeDoppler("doppler-key");
     const env = dopplerEnv();
-    expect((await worker.fetch(listReq("doppler-key"), env)).status).toBe(200);
-    expect((await worker.fetch(listReq("env-key-ignored"), env)).status).toBe(401);
+    expect((await worker.fetch(listReq("doppler-key"), env, makeCtx())).status).toBe(200);
+    expect((await worker.fetch(listReq("env-key-ignored"), env, makeCtx())).status).toBe(401);
     expect(doppler.lastAuth).toBe("Bearer dp.st.staging.test");
   });
 
@@ -74,7 +74,7 @@ describe("key from Doppler (#21)", () => {
   it("refuses with 503 (never lets a request in) when Doppler is down and there's no cached key", async () => {
     const doppler = fakeDoppler("k");
     doppler.down = true;
-    const res = await worker.fetch(listReq("anything"), dopplerEnv());
+    const res = await worker.fetch(listReq("anything"), dopplerEnv(), makeCtx());
     expect(res.status).toBe(503);
   });
 

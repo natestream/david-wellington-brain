@@ -9,7 +9,7 @@
  *   --cleanup-file <path>: also write the cleanup commands to a shell script (CI runs it after)
  *
  * What it checks (the same steps as the phone test, minus Claude):
- *   1. GET / answers; /mcp without the key or with a wrong key → 401
+ *   1. GET / answers; /mcp without the key or with a wrong key → 401; Google sign-in discovery works
  *   2. tools/list shows all 6 tools
  *   3. log_door: 5 doors with mixed objections (or --doors N); similar_doors comes back once
  *      there is history, and there is no search_warning (= Workers AI + Vectorize work)
@@ -126,12 +126,31 @@ async function main() {
     body: JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method: "tools/list", params: {} }),
   });
   check(qs.status === 401, `key in query string → ${qs.status} (want 401)`);
+  // Google sign-in (#25): what Claude's connector discovers and uses.
   const viaBearer = await fetch(`${base}/mcp`, {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json, text/event-stream", authorization: `Bearer ${key}` },
     body: JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method: "tools/list", params: {} }),
   });
-  check(viaBearer.status === 200, `Authorization: Bearer → ${viaBearer.status} (want 200)`);
+  check(viaBearer.status === 401, `BRAIN_KEY as a Bearer token → ${viaBearer.status} (want 401: Bearer is for sign-in tokens)`);
+  const challenge = await fetch(`${base}/mcp`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+  check(
+    challenge.status === 401 && (challenge.headers.get("www-authenticate") ?? "").includes("resource_metadata="),
+    `no key → sign-in challenge (${challenge.status}, www-authenticate names the resource metadata)`,
+  );
+  const prm = await fetch(`${base}/.well-known/oauth-protected-resource/mcp`);
+  const prmBody = prm.ok ? ((await prm.json()) as { authorization_servers?: string[] }) : {};
+  check(prm.ok && (prmBody.authorization_servers ?? []).length > 0, `protected resource metadata → ${prm.status}`);
+  const asMeta = await fetch(`${base}/.well-known/oauth-authorization-server`);
+  const asBody = asMeta.ok ? ((await asMeta.json()) as { registration_endpoint?: string }) : {};
+  check(asMeta.ok && !!asBody.registration_endpoint, `authorization server metadata → ${asMeta.status}, with client registration`);
+  const authorize = await fetch(`${base}/authorize`, { redirect: "manual" });
+  const authorizeText = await authorize.text();
+  if (authorizeText.includes("GOOGLE_CLIENT_ID")) {
+    warn("Google sign-in isn't set up yet: add GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and ALLOWED_EMAILS to Doppler");
+  } else {
+    pass(`/authorize answers (${authorize.status}); Google sign-in is configured`);
+  }
 
   console.log("\n2. Tools");
   const list = (await (await rpc("tools/list", {})).json()) as any;

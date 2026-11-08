@@ -4,6 +4,31 @@ A free, cloud-hosted second brain for door-to-door window cleaning, used from th
 
 After each door, David tells Claude what happened, gets coaching right away, and the door is saved. At the end of the day he drops in his Rotor CRM pin export, adds his hours and ARR sold, and his 6 KPIs are saved as one clean row per rep. Everything is reachable from any device signed in to his Claude account.
 
+## Connect in Claude: sign in with Google (#25)
+
+1. Claude → **Settings → Connectors → Add custom connector**.
+2. Name it (e.g. *Door Brain*), URL `https://<worker>.<subdomain>.workers.dev/mcp`. Nothing else: no header, no OAuth fields.
+3. **Connect** → *Continue with Google* → pick the Google account. Done.
+
+Only Google accounts in `ALLOWED_EMAILS` (Doppler) get in. The list is checked on every request, so adding or removing someone works within a minute, no deploy. Claude stays signed in while it's used (90 idle days).
+
+### One-time Google setup (per account)
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → create a project (e.g. *Door Brain*).
+2. **Google Auth Platform → Branding** (OAuth consent screen): app name, support email. **Audience: External**, then **Publish app** (only `openid email` is asked for, so no Google review is needed). Left in *Testing*, only the test users listed there can sign in.
+3. **Clients → Create client → Web application**. **Authorized redirect URI:** `https://<worker>.<subdomain>.workers.dev/callback`.
+4. Put the client ID and secret in Doppler (the `staging` config for Nate, `david` for David), with the allowed accounts:
+
+| Doppler key | Value |
+|---|---|
+| `GOOGLE_CLIENT_ID` | from step 3 |
+| `GOOGLE_CLIENT_SECRET` | from step 3 |
+| `ALLOWED_EMAILS` | e.g. `david@gmail.com, nate@gmail.com` |
+
+Live within about a minute; no deploy. The smoke test warns while these are missing.
+
+Scripts (smoke test, import) still use the `x-api-key: <BRAIN_KEY>` header. `BRAIN_KEY` also signs the "remember this app" cookie on the sign-in page.
+
 ## Deploys: one repo, every account (#16)
 
 This repo is the only copy of the code. GitHub Actions deploys it to each Cloudflare account, so David needs no GitHub account, and every fix reaches him with one merge.
@@ -30,7 +55,7 @@ Doppler project `door-brain`, two configs per account (`staging` shown; David's 
 
 | Config | Holds | Its read-only service token goes in |
 |---|---|---|
-| `staging` | `BRAIN_KEY`: the connector key (`openssl rand -hex 32`, different per account) | `staging_ci` as `WORKER_DOPPLER_TOKEN` |
+| `staging` | `BRAIN_KEY` (`openssl rand -hex 32`, different per account), plus `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ALLOWED_EMAILS` (above) | `staging_ci` as `WORKER_DOPPLER_TOKEN` |
 | `staging_ci` | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `WORKER_DOPPLER_TOKEN` (no `BRAIN_KEY`: the deploy reads it from `staging` with `WORKER_DOPPLER_TOKEN`, like the Worker) | GitHub Environment `staging` as `DOPPLER_TOKEN` |
 
 Two tokens so the running server can only read `BRAIN_KEY`, never the Cloudflare credentials. Service tokens: open the config → **Access → Service Tokens → Generate**, read-only.
@@ -38,7 +63,7 @@ Two tokens so the running server can only read `BRAIN_KEY`, never the Cloudflare
 - The Worker keeps `BRAIN_KEY` for 60 seconds, then asks Doppler again. If Doppler is down it keeps using the last key it got; if it never got one, it refuses every request (503).
 - Any `BRAIN_KEY` secret left on the Worker is ignored.
 
-**Change the connector key:** set a new `BRAIN_KEY` in the `staging` config → update the connector's `x-api-key` header in Claude. Live within about a minute. No deploy.
+**Change who can sign in:** edit `ALLOWED_EMAILS` in `staging`. **Change the script key:** set a new `BRAIN_KEY` in `staging` (signed-in Claude users stay signed in; the sign-in page asks once more). Both live within about a minute. No deploy.
 **Change the Cloudflare token:** update it in `staging_ci`. The next deploy uses it.
 **Change the Worker's Doppler token:** update `WORKER_DOPPLER_TOKEN` in `staging_ci`, then run the deploy once (it's what the Worker holds).
 
@@ -58,7 +83,7 @@ In the account's Cloudflare dashboard: **My Profile → API Tokens → Create To
 2. He creates the API token (above) while you watch, and reads you his account ID.
 3. In Doppler, create `david` (a fresh `BRAIN_KEY`) and `david_ci` (his Cloudflare token, account ID, and `david`'s service token as `WORKER_DOPPLER_TOKEN`). Create the `david` GitHub Environment with `david_ci`'s service token as `DOPPLER_TOKEN`, and set `PROD_TARGETS` to `["david"]`.
 4. **Actions → Deploy → Run workflow**. When the production job is green, its log shows his URL.
-5. In Claude: **Settings → Connectors → Add custom connector**. URL `https://<worker>.<his-subdomain>.workers.dev/mcp`, request header `x-api-key: <BRAIN_KEY>` (Claude only allows approved custom header names; `x-api-key` is one). The key never goes in the URL.
+5. Google setup for his Worker (**Connect in Claude** above): redirect URI `https://<worker>.<his-subdomain>.workers.dev/callback`, and `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ALLOWED_EMAILS` (his Gmail) in the `david` config. Then in Claude: **Add custom connector** → his URL ending in `/mcp` → **Connect** → *Continue with Google*.
 6. Test: *"Log a door: no answer on Main St."*
 
 David is on Claude Free, which allows one custom connector. He has none yet, so this one fits.
@@ -157,7 +182,8 @@ Door outcomes use Rotor's pin types, so logged doors compare 1:1 with the export
 
 ```
 src/
-  index.ts          # Worker entry: auth check, routes /mcp and /admin/import
+  index.ts          # Worker entry: scripts (x-api-key) or Google sign-in, routes /mcp and /admin/import
+  oauth.ts          # Google sign-in for Claude's connector: consent page, Google callback, email allowlist (#25)
   mcp.ts            # MCP server (stateless Streamable HTTP) + tool registration
   admin.ts          # POST /admin/import for the one-time markdown import
   tools/
@@ -165,7 +191,8 @@ src/
     kpis.ts         # save_daily_kpis, get_kpis (KPI_FIELDS + computeKpis live here)
     notes.ts        # save_note, ask_brain
   lib/
-    auth.ts         # x-api-key check (constant-time), 401
+    auth.ts         # x-api-key check for scripts (constant-time), 401
+    keystore.ts     # secrets from Doppler at runtime (60s cache), env fallback (#21)
     embed.ts        # Workers AI embedding helper
     vectors.ts      # Vectorize upsert/query + D1 hydration
     chunk.ts        # note chunking for embeddings
@@ -179,13 +206,13 @@ scripts/
 .github/workflows/
   ci.yml            # PRs: typecheck + tests
   deploy.yml        # main: check → staging + smoke → production targets
-test/               # vitest: real SQLite for D1, fakes for Vectorize + Workers AI
+test/               # vitest: real SQLite for D1, fakes for Vectorize, Workers AI, KV and Google
 wrangler.jsonc
 ```
 
 ## Conventions
 
-- **Auth:** require the `x-api-key` header matching `BRAIN_KEY` (read from Doppler, or the env locally). HTTP 401 otherwise. The key is never accepted as a query param.
+- **Auth:** Claude signs in with Google (OAuth 2.1, `@cloudflare/workers-oauth-provider`, tokens in KV `OAUTH_KV`); every MCP call re-checks the email against `ALLOWED_EMAILS`. Scripts send `x-api-key` matching `BRAIN_KEY`. Keys are never accepted in the URL.
 - **Dates:** `YYYY-MM-DD` in America/Los_Angeles. Default to today.
 - **IDs:** `crypto.randomUUID()`. Imported notes use an id derived from the file path so re-imports replace instead of duplicating.
 - **No PDF storage:** extract the numbers, discard the file.

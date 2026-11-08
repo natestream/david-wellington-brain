@@ -1,5 +1,6 @@
 import worker from "../src/index";
 import type { Env } from "../src/env";
+import { makeCtx } from "./fakes";
 
 let nextId = 1;
 
@@ -17,6 +18,7 @@ export async function rpc(env: Env, method: string, params: unknown = {}, header
       body: JSON.stringify({ jsonrpc: "2.0", id: nextId++, method, params }),
     }),
     env,
+    makeCtx(),
   );
   return res;
 }
