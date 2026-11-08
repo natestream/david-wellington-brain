@@ -3,7 +3,7 @@ import worker from "../src/index";
 import { idFromPath } from "../src/admin";
 import { CHUNK_CHARS, chunkText } from "../src/lib/chunk";
 import { addDays, isValidDate, today } from "../src/lib/dates";
-import { makeEnv, type TestEnv } from "./fakes";
+import { makeCtx, makeEnv, type TestEnv } from "./fakes";
 import { callTool } from "./mcp-client";
 
 describe("save_note + ask_brain (#8)", () => {
@@ -94,6 +94,7 @@ describe("/admin/import (#9)", () => {
         body: JSON.stringify({ notes }),
       }),
       env,
+      makeCtx(),
     );
   }
 

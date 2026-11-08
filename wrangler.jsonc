@@ -3,7 +3,8 @@
   "name": "david-wellington-brain",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
-  "compatibility_flags": ["nodejs_compat"],
+  // global_fetch_strictly_public: required by the OAuth library to fetch Client ID Metadata Documents safely.
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "observability": { "enabled": true },
 
   // D1: structured tables (doors, daily_kpis, notes).
@@ -33,8 +34,12 @@
     }
   ],
 
+  // KV for Google sign-in (OAuth clients, grants, tokens; hashed/encrypted by the library).
+  // No id on purpose: the deploy creates the namespace on the account that deploys, like D1.
+  "kv_namespaces": [{ "binding": "OAUTH_KV" }],
+
   // Workers AI: embeddings only. No other model is called by the server.
   "ai": { "binding": "AI", "remote": true }
 
-  // Secret (not in this file): BRAIN_KEY. Set with `wrangler secret put BRAIN_KEY`.
+  // Secret (not in this file): DOPPLER_TOKEN. Every other secret is read from Doppler at runtime.
 }

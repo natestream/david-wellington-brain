@@ -1,10 +1,11 @@
 /**
- * Header auth: the current key (see keystore.ts), sent as `x-api-key: <key>` (what Claude's connector sends)
- * or `Authorization: Bearer <key>`. The key is never accepted in the URL (it would leak into logs).
+ * Script auth: `x-api-key: <BRAIN_KEY>` (see keystore.ts), for the smoke test and the import.
+ * Claude's connector signs in with Google instead (src/oauth.ts), so `Authorization: Bearer` is
+ * an OAuth token here, never BRAIN_KEY. The key is never accepted in the URL (it would leak into logs).
  */
 export async function isAuthorized(request: Request, secret: string | undefined): Promise<boolean> {
   if (!secret) return false;
-  const provided = request.headers.get("x-api-key") || bearer(request);
+  const provided = request.headers.get("x-api-key");
   const ok = provided ? await timingSafeEqualStrings(provided, secret) : false;
   if (!ok) await logAuthFailure(request, provided, secret);
   return ok;
@@ -28,7 +29,6 @@ async function logAuthFailure(request: Request, provided: string | null, secret:
   };
   if (provided) {
     info.sent = {
-      via: request.headers.get("x-api-key") ? "x-api-key" : "authorization",
       length: provided.length,
       sha256_8: await fingerprint(provided),
       has_quotes: /^["']|["']$/.test(provided),
@@ -41,11 +41,6 @@ async function logAuthFailure(request: Request, provided: string | null, secret:
 async function fingerprint(value: string): Promise<string> {
   const d = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
   return [...d.slice(0, 4)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function bearer(request: Request): string | null {
-  const m = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/i);
-  return m ? m[1]!.trim() : null;
 }
 
 /** Compare SHA-256 digests in constant time so the comparison doesn't leak the key length or prefix. */
@@ -62,10 +57,7 @@ async function timingSafeEqualStrings(a: string, b: string): Promise<boolean> {
   return diff === 0;
 }
 
-/**
- * No `www-authenticate` header on purpose: under the MCP spec it tells Claude to start an OAuth
- * sign-in, which this server doesn't offer, so reconnecting the connector fails.
- */
+/** A wrong or missing script key. Only scripts get here: Claude's 401s come from the OAuth layer. */
 export function unauthorized(): Response {
   return new Response(JSON.stringify({ error: "unauthorized", hint: "Send the x-api-key header." }), {
     status: 401,

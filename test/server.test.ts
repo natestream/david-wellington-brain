@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import worker from "../src/index";
-import { makeEnv } from "./fakes";
+import { makeCtx, makeEnv } from "./fakes";
 import { rpc } from "./mcp-client";
 
 const TOOLS = ["ask_brain", "get_kpis", "log_door", "objection_stats", "save_daily_kpis", "save_note"];
@@ -29,6 +29,7 @@ describe("auth (#2)", () => {
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
       }),
       env,
+      makeCtx(),
     );
     expect(res.status).toBe(401);
   });
@@ -40,17 +41,16 @@ describe("auth (#2)", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
 
-  it("accepts Authorization: Bearer <key>", async () => {
+  it("never accepts BRAIN_KEY as a Bearer token: Bearer means a Google sign-in token now (#25)", async () => {
     const env = makeEnv();
-    const ok = await worker.fetch(listReq("https://brain.example/mcp", { authorization: `Bearer ${env.BRAIN_KEY}` }), env);
-    expect(ok.status).toBe(200);
-    const bad = await worker.fetch(listReq("https://brain.example/mcp", { authorization: "Bearer nope" }), env);
-    expect(bad.status).toBe(401);
+    const res = await worker.fetch(listReq("https://brain.example/mcp", { authorization: `Bearer ${env.BRAIN_KEY}` }), env, makeCtx());
+    expect(res.status).toBe(401);
   });
 
   it("never accepts the key in the path", async () => {
     const env = makeEnv();
-    expect((await worker.fetch(listReq(`https://brain.example/mcp/${env.BRAIN_KEY}`), env)).status).toBe(404);
+    const res = await worker.fetch(listReq(`https://brain.example/mcp/${env.BRAIN_KEY}`), env, makeCtx());
+    expect(res.status).not.toBe(200);
   });
 
   it("logs why a request was refused, without logging any key", async () => {
@@ -65,7 +65,7 @@ describe("auth (#2)", () => {
     }
     const [none, wrong] = logs.map((l) => JSON.parse(l));
     expect(none).toMatchObject({ event: "auth_failed", reason: "no_key_header", path: "/mcp" });
-    expect(wrong).toMatchObject({ reason: "wrong_key", sent: { via: "x-api-key", length: 11, has_quotes: true, has_spaces: true } });
+    expect(wrong).toMatchObject({ reason: "wrong_key", sent: { length: 11, has_quotes: true, has_spaces: true } });
     expect(wrong.expected.length).toBe(12);
     expect(wrong.sent.sha256_8).not.toBe(wrong.expected.sha256_8);
     expect(logs.join("")).not.toContain("the-real-key");
@@ -74,7 +74,7 @@ describe("auth (#2)", () => {
 
   it("protects /admin/import too", async () => {
     const env = makeEnv();
-    const res = await worker.fetch(new Request("https://brain.example/admin/import", { method: "POST", body: "{}" }), env);
+    const res = await worker.fetch(new Request("https://brain.example/admin/import", { method: "POST", body: "{}" }), env, makeCtx());
     expect(res.status).toBe(401);
   });
 
@@ -86,8 +86,8 @@ describe("auth (#2)", () => {
 
   it("serves a plain health page at / and 404 elsewhere", async () => {
     const env = makeEnv();
-    expect((await worker.fetch(new Request("https://brain.example/"), env)).status).toBe(200);
-    expect((await worker.fetch(new Request("https://brain.example/nope"), env)).status).toBe(404);
+    expect((await worker.fetch(new Request("https://brain.example/"), env, makeCtx())).status).toBe(200);
+    expect((await worker.fetch(new Request("https://brain.example/nope"), env, makeCtx())).status).toBe(404);
   });
 });
 
