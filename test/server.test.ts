@@ -16,6 +16,8 @@ describe("auth (#2)", () => {
     const env = makeEnv();
     const res = await rpc(env, "tools/list", {}, { "x-api-key": "nope" });
     expect(res.status).toBe(401);
+    // A www-authenticate header would make Claude try OAuth, which this server doesn't offer.
+    expect(res.headers.get("www-authenticate")).toBeNull();
   });
 
   it("never accepts the key as a query param", async () => {
