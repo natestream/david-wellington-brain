@@ -1,5 +1,5 @@
 /**
- * Header auth: the BRAIN_KEY secret, sent as `x-api-key: <key>` (what Claude's connector sends)
+ * Header auth: the current key (see keystore.ts), sent as `x-api-key: <key>` (what Claude's connector sends)
  * or `Authorization: Bearer <key>`. The key is never accepted in the URL (it would leak into logs).
  */
 export async function isAuthorized(request: Request, secret: string | undefined): Promise<boolean> {

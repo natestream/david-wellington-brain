@@ -1,3 +1,7 @@
 # Secret the Worker needs. Pick a long random string, e.g. `openssl rand -hex 32`.
 # Local dev: copy this file to .dev.vars. Production: `wrangler secret put BRAIN_KEY`.
 BRAIN_KEY=
+
+# Optional: read the key from Doppler instead, like deployed Workers do (#21).
+# A read-only service token for one config; BRAIN_KEY above is then ignored.
+# DOPPLER_TOKEN=

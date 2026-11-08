@@ -2,7 +2,9 @@
 #   check → staging (Nate's account, full smoke test) → production targets (David's account, health check)
 #
 # Each target is a GitHub Environment (Settings → Environments) with 3 secrets:
-#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, BRAIN_KEY
+#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, DOPPLER_TOKEN
+# DOPPLER_TOKEN is a read-only Doppler service token for that target's config; the Worker reads
+# BRAIN_KEY from Doppler at runtime (#21). Older setup: a BRAIN_KEY secret instead (baked in at deploy).
 # Production targets come from the repo variable PROD_TARGETS, e.g. ["david"].
 # Leave it unset and only staging deploys. A new client = a new Environment + one entry.
 name: Deploy
@@ -39,6 +41,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
       BRAIN_KEY: ${{ secrets.BRAIN_KEY }}
     steps:
       - uses: actions/checkout@v4
@@ -69,6 +72,7 @@ jobs:
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
       BRAIN_KEY: ${{ secrets.BRAIN_KEY }}
     steps:
       - uses: actions/checkout@v4

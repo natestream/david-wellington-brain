@@ -14,7 +14,7 @@ On every merge to `main` (or **Actions → Deploy → Run workflow**), `.github/
 2. **staging** (Nate's account): deploys, runs the full `npm run smoke` against it, then deletes the test data.
 3. **production** (David's account, one job per entry in `PROD_TARGETS`): deploys, then a read-only health check (`--health`: 401s + tools list, writes nothing). Runs only if staging passed.
 
-Each deploy (`scripts/ci-deploy.sh`) creates the D1 database and the Vectorize index (768, cosine) if they're missing, applies new migrations, then deploys the Worker with `BRAIN_KEY` set. So a first deploy on a fresh account needs no clicks in Cloudflare, and re-deploys never touch data. Keep migrations additive (new tables/columns): they apply just before the new code goes live.
+Each deploy (`scripts/ci-deploy.sh`) creates the D1 database and the Vectorize index (768, cosine) if they're missing, applies new migrations, then deploys the Worker with its `DOPPLER_TOKEN` set. So a first deploy on a fresh account needs no clicks in Cloudflare, and re-deploys never touch data. Keep migrations additive (new tables/columns): they apply just before the new code goes live.
 
 Each target is a GitHub **Environment** (**Settings → Environments**) with 3 secrets:
 
@@ -22,11 +22,22 @@ Each target is a GitHub **Environment** (**Settings → Environments**) with 3 s
 |---|---|
 | `CLOUDFLARE_API_TOKEN` | API token on that person's Cloudflare account (how to make one below) |
 | `CLOUDFLARE_ACCOUNT_ID` | Their account ID (dashboard → **Workers & Pages**, right-hand side) |
-| `BRAIN_KEY` | The key the Claude connector sends. Long random string (`openssl rand -hex 32`), different per account |
+| `DOPPLER_TOKEN` | Read-only Doppler **service token** for that account's config (see **The key lives in Doppler** below) |
 
 The repo variable `PROD_TARGETS` (**Settings → Secrets and variables → Actions → Variables**) lists the production Environments, e.g. `["david"]`. Unset = staging only. A new client later = a new Environment + one entry (the server instructions name David, so make those configurable first).
 
 To approve David's deploys by hand, add yourself as a **Required reviewer** on the `david` Environment.
+
+### The key lives in Doppler (#21)
+
+The Worker reads `BRAIN_KEY` (the key the Claude connector sends) straight from Doppler at runtime, so **changing the key never needs a deploy**. No sync to GitHub or Cloudflare.
+
+- Doppler project `door-brain`, one config per account: `staging` (Nate), `david` (David). Each holds `BRAIN_KEY`: a long random string (`openssl rand -hex 32`), different per account.
+- Per config: **Access → Service Tokens → Generate**, read-only. That token goes in the GitHub Environment as `DOPPLER_TOKEN` (set once).
+- The Worker keeps the key for 60 seconds, then asks Doppler again. If Doppler is down it keeps using the last key it got; if it never got one, it refuses every request (503).
+- While `DOPPLER_TOKEN` is set, a `BRAIN_KEY` secret on the Worker or in GitHub is ignored. Without `DOPPLER_TOKEN`, the deploy falls back to a GitHub `BRAIN_KEY` secret (the old way).
+
+**Change the key:** set a new `BRAIN_KEY` in Doppler → update the connector's `x-api-key` header in Claude. Live within about a minute. No deploy.
 
 ### API token (one per account)
 
@@ -42,14 +53,14 @@ In the account's Cloudflare dashboard: **My Profile → API Tokens → Create To
 
 1. He signs up at cloudflare.com (free, no card) and opens **Workers & Pages** once (sets up his workers.dev subdomain).
 2. He creates the API token (above) while you watch, and reads you his account ID.
-3. You create the `david` Environment with his token, account ID and a fresh `BRAIN_KEY` (save it in his password manager), and set `PROD_TARGETS` to `["david"]`.
+3. In Doppler, create the `david` config with a fresh `BRAIN_KEY` and a read-only service token. Create the `david` GitHub Environment with his Cloudflare token, account ID and that `DOPPLER_TOKEN`, and set `PROD_TARGETS` to `["david"]`.
 4. **Actions → Deploy → Run workflow**. When the production job is green, its log shows his URL.
 5. In Claude: **Settings → Connectors → Add custom connector**. URL `https://<worker>.<his-subdomain>.workers.dev/mcp`, request header `x-api-key: <BRAIN_KEY>` (Claude only allows approved custom header names; `x-api-key` is one). The key never goes in the URL.
 6. Test: *"Log a door: no answer on Main St."*
 
 David is on Claude Free, which allows one custom connector. He has none yet, so this one fits.
 
-No secrets live in the code. `BRAIN_KEY` and the tokens only live in GitHub Environments and on Cloudflare. He can revoke the token anytime from his Cloudflare profile; the Worker keeps running, only new deploys stop.
+No secrets live in the code. `BRAIN_KEY` lives only in Doppler; the tokens live in GitHub Environments and on Cloudflare. He can revoke the token anytime from his Cloudflare profile; the Worker keeps running, only new deploys stop.
 
 The [Deploy to Cloudflare button](https://deploy.workers.cloudflare.com/?url=https://github.com/natestream/david-wellington-brain) still works for a one-off copy, but it copies the repo into the deployer's GitHub, and that copy doesn't get updates from here. If it asks for the Vectorize **dimensions**, enter `768`, metric `cosine`.
 
@@ -171,7 +182,7 @@ wrangler.jsonc
 
 ## Conventions
 
-- **Auth:** require the `x-api-key` header matching the `BRAIN_KEY` secret. HTTP 401 otherwise. The key is never accepted as a query param.
+- **Auth:** require the `x-api-key` header matching `BRAIN_KEY` (read from Doppler, or the env locally). HTTP 401 otherwise. The key is never accepted as a query param.
 - **Dates:** `YYYY-MM-DD` in America/Los_Angeles. Default to today.
 - **IDs:** `crypto.randomUUID()`. Imported notes use an id derived from the file path so re-imports replace instead of duplicating.
 - **No PDF storage:** extract the numbers, discard the file.
@@ -237,6 +248,7 @@ Covered by `npm test` (45 tests): auth/401, tool listing, every tool's SQL, upse
 
 ```bash
 BRAIN_KEY=... npm run smoke -- --url https://<worker>.workers.dev              # 5 doors, all checks
+DOPPLER_TOKEN=... npm run smoke -- --url https://<worker>.workers.dev          # same, key read from Doppler
 BRAIN_KEY=... npm run smoke -- --url https://<worker>.workers.dev --doors 60   # simulated full day
 ```
 
