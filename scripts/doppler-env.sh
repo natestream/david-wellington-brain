@@ -19,6 +19,22 @@ set -euo pipefail
 : "${DOPPLER_TOKEN:?set the DOPPLER_TOKEN secret on this GitHub Environment}"
 : "${GITHUB_ENV:?run this inside GitHub Actions}"
 
+# DOPPLER_HOP: the name of a secret in the DOPPLER_TOKEN config that holds another config's
+# read-only token (production: stg_ci's PRD_CI_DOPPLER_TOKEN → prd_ci). Load from that config instead.
+if [[ -n "${DOPPLER_HOP:-}" ]]; then
+  hop="$(curl -fsS --retry 3 --max-time 15 \
+    -H "Authorization: Bearer ${DOPPLER_TOKEN}" -H "Accept: application/json" \
+    "https://api.doppler.com/v3/configs/config/secrets/download?format=json" \
+    | HOP_NAME="$DOPPLER_HOP" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(String(JSON.parse(s)[process.env.HOP_NAME]??"").trim()))')" || hop=""
+  if [[ -z "$hop" ]]; then
+    echo "::error::${DOPPLER_HOP} is missing in the config DOPPLER_TOKEN belongs to (stg_ci). Add a read-only service token for the target's CI config there."
+    exit 1
+  fi
+  echo "::add-mask::${hop}"
+  DOPPLER_TOKEN="$hop"
+  echo "Loading from the config ${DOPPLER_HOP} points at."
+fi
+
 json="$(curl -fsS --retry 3 --max-time 15 \
   -H "Authorization: Bearer ${DOPPLER_TOKEN}" -H "Accept: application/json" \
   "https://api.doppler.com/v3/configs/config/secrets/download?format=json")" || {
