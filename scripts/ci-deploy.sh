@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Deploy this Worker to one Cloudflare account (used by .github/workflows/deploy.yml).
 #
-# Needs: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, and DOPPLER_TOKEN (or BRAIN_KEY).
-# DOPPLER_TOKEN: the Worker reads BRAIN_KEY from Doppler at runtime (#21), so changing the key
-# in Doppler needs no deploy. BRAIN_KEY: the older way, the key baked in at deploy time.
+# Needs: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, WORKER_DOPPLER_TOKEN (all from Doppler,
+# loaded by scripts/doppler-env.sh). The Worker gets WORKER_DOPPLER_TOKEN and reads BRAIN_KEY from
+# Doppler at runtime (#21), so changing the key needs no deploy.
 # Safe to re-run: creates D1 + Vectorize only if they're missing, migrations only apply once,
 # and the deploy replaces the previous version. Data is never touched.
 #
@@ -13,10 +13,7 @@ set -euo pipefail
 
 : "${CLOUDFLARE_API_TOKEN:?set CLOUDFLARE_API_TOKEN}"
 : "${CLOUDFLARE_ACCOUNT_ID:?set CLOUDFLARE_ACCOUNT_ID}"
-if [[ -z "${DOPPLER_TOKEN:-}" && -z "${BRAIN_KEY:-}" ]]; then
-  echo "set DOPPLER_TOKEN (or BRAIN_KEY)" >&2
-  exit 1
-fi
+: "${WORKER_DOPPLER_TOKEN:?set WORKER_DOPPLER_TOKEN (in Doppler)}"
 
 DB_NAME="david-brain"
 INDEX_NAME="david-brain-notes"
@@ -47,14 +44,9 @@ echo "::group::Deploy"
 secrets="$(mktemp)"
 log="$(mktemp)"
 trap 'rm -f "$secrets" "$log"' EXIT
-if [[ -n "${DOPPLER_TOKEN:-}" ]]; then
-  # The Worker ignores any BRAIN_KEY secret once DOPPLER_TOKEN is set, so Doppler is the only source.
-  echo "Key source: Doppler (DOPPLER_TOKEN)"
-  node -e 'process.stdout.write(JSON.stringify({ DOPPLER_TOKEN: process.env.DOPPLER_TOKEN }))' > "$secrets"
-else
-  echo "Key source: BRAIN_KEY baked in at deploy (set DOPPLER_TOKEN to read it from Doppler instead)"
-  node -e 'process.stdout.write(JSON.stringify({ BRAIN_KEY: process.env.BRAIN_KEY }))' > "$secrets"
-fi
+# Only the read-only token for the BRAIN_KEY config goes on the Worker, never the CI token, so the
+# running server can't read the Cloudflare credentials. Any BRAIN_KEY secret on it is ignored.
+node -e 'process.stdout.write(JSON.stringify({ DOPPLER_TOKEN: process.env.WORKER_DOPPLER_TOKEN }))' > "$secrets"
 wrangler deploy --secrets-file "$secrets" 2>&1 | tee "$log"
 echo "::endgroup::"
 

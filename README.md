@@ -16,36 +16,39 @@ On every merge to `main` (or **Actions → Deploy → Run workflow**), `.github/
 
 Each deploy (`scripts/ci-deploy.sh`) creates the D1 database and the Vectorize index (768, cosine) if they're missing, applies new migrations, then deploys the Worker with its `DOPPLER_TOKEN` set. So a first deploy on a fresh account needs no clicks in Cloudflare, and re-deploys never touch data. Keep migrations additive (new tables/columns): they apply just before the new code goes live.
 
-Each target is a GitHub **Environment** (**Settings → Environments**) with 3 secrets:
-
-| Secret | What |
-|---|---|
-| `CLOUDFLARE_API_TOKEN` | API token on that person's Cloudflare account (how to make one below) |
-| `CLOUDFLARE_ACCOUNT_ID` | Their account ID (dashboard → **Workers & Pages**, right-hand side) |
-| `DOPPLER_TOKEN` | Read-only Doppler **service token** for that account's config (see **The key lives in Doppler** below) |
+Each target is a GitHub **Environment** (**Settings → Environments**) with **one** secret, `DOPPLER_TOKEN`. Every other key lives in Doppler (below).
 
 The repo variable `PROD_TARGETS` (**Settings → Secrets and variables → Actions → Variables**) lists the production Environments, e.g. `["david"]`. Unset = staging only. A new client later = a new Environment + one entry (the server instructions name David, so make those configurable first).
 
 To approve David's deploys by hand, add yourself as a **Required reviewer** on the `david` Environment.
 
-### The key lives in Doppler (#21)
+### All keys live in Doppler (#21)
 
-The Worker reads `BRAIN_KEY` (the key the Claude connector sends) straight from Doppler at runtime, so **changing the key never needs a deploy**. No sync to GitHub or Cloudflare.
+No sync. The deploy reads its keys from Doppler when it runs (`scripts/doppler-env.sh`), and the Worker reads `BRAIN_KEY` from Doppler while it runs. **Changing a key in Doppler never needs a sync, and changing `BRAIN_KEY` never needs a deploy.**
 
-- Doppler project `door-brain`, one config per account: `staging` (Nate), `david` (David). Each holds `BRAIN_KEY`: a long random string (`openssl rand -hex 32`), different per account.
-- Per config: **Access → Service Tokens → Generate**, read-only. That token goes in the GitHub Environment as `DOPPLER_TOKEN` (set once).
-- The Worker keeps the key for 60 seconds, then asks Doppler again. If Doppler is down it keeps using the last key it got; if it never got one, it refuses every request (503).
-- While `DOPPLER_TOKEN` is set, a `BRAIN_KEY` secret on the Worker or in GitHub is ignored. Without `DOPPLER_TOKEN`, the deploy falls back to a GitHub `BRAIN_KEY` secret (the old way).
+Doppler project `door-brain`, two configs per account (`staging` shown; David's are `david` and `david_ci`):
 
-**Change the key:** set a new `BRAIN_KEY` in Doppler → update the connector's `x-api-key` header in Claude. Live within about a minute. No deploy.
+| Config | Holds | Its read-only service token goes in |
+|---|---|---|
+| `staging` | `BRAIN_KEY`: the connector key (`openssl rand -hex 32`, different per account) | `staging_ci` as `WORKER_DOPPLER_TOKEN` |
+| `staging_ci` (a **branch config** of `staging`, so it inherits `BRAIN_KEY`) | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `WORKER_DOPPLER_TOKEN` | GitHub Environment `staging` as `DOPPLER_TOKEN` |
+
+Two tokens so the running server can only read `BRAIN_KEY`, never the Cloudflare credentials. Service tokens: open the config → **Access → Service Tokens → Generate**, read-only.
+
+- The Worker keeps `BRAIN_KEY` for 60 seconds, then asks Doppler again. If Doppler is down it keeps using the last key it got; if it never got one, it refuses every request (503).
+- Any `BRAIN_KEY` secret left on the Worker is ignored.
+
+**Change the connector key:** set a new `BRAIN_KEY` in the `staging` config → update the connector's `x-api-key` header in Claude. Live within about a minute. No deploy.
+**Change the Cloudflare token:** update it in `staging_ci`. The next deploy uses it.
+**Change the Worker's Doppler token:** update `WORKER_DOPPLER_TOKEN` in `staging_ci`, then run the deploy once (it's what the Worker holds).
 
 ### API token (one per account)
 
-In the account's Cloudflare dashboard: **My Profile → API Tokens → Create Token → "Edit Cloudflare Workers" template**, then add the account permissions **D1: Edit** and **Vectorize: Edit**, and set **Account Resources** to that account. Copy the token (it's shown once) straight into the GitHub secret. Not yet verified against a real account: if the first deploy fails with an auth error, the log names the missing permission.
+In the account's Cloudflare dashboard: **My Profile → API Tokens → Create Token → "Edit Cloudflare Workers" template**, then add the account permissions **D1: Edit** and **Vectorize: Edit**, and set **Account Resources** to that account. Copy the token (it's shown once) straight into Doppler as `CLOUDFLARE_API_TOKEN`. Not yet verified against a real account: if the first deploy fails with an auth error, the log names the missing permission.
 
 ### One-time: staging on Nate's account (before Saturday)
 
-1. Create the `staging` Environment with the 3 secrets above (token from Nate's account).
+1. Set up the `staging` and `staging_ci` configs in Doppler (above), then create the `staging` GitHub Environment with `DOPPLER_TOKEN`.
 2. **Actions → Deploy → Run workflow**. The staging job should pass, including the smoke test.
 3. If the log warns about no workers.dev URL: open **Workers & Pages** in the dashboard once so the account gets a workers.dev subdomain, then run it again.
 
@@ -53,14 +56,14 @@ In the account's Cloudflare dashboard: **My Profile → API Tokens → Create To
 
 1. He signs up at cloudflare.com (free, no card) and opens **Workers & Pages** once (sets up his workers.dev subdomain).
 2. He creates the API token (above) while you watch, and reads you his account ID.
-3. In Doppler, create the `david` config with a fresh `BRAIN_KEY` and a read-only service token. Create the `david` GitHub Environment with his Cloudflare token, account ID and that `DOPPLER_TOKEN`, and set `PROD_TARGETS` to `["david"]`.
+3. In Doppler, create `david` (a fresh `BRAIN_KEY`) and its branch `david_ci` (his Cloudflare token, account ID, and `david`'s service token as `WORKER_DOPPLER_TOKEN`). Create the `david` GitHub Environment with `david_ci`'s service token as `DOPPLER_TOKEN`, and set `PROD_TARGETS` to `["david"]`.
 4. **Actions → Deploy → Run workflow**. When the production job is green, its log shows his URL.
 5. In Claude: **Settings → Connectors → Add custom connector**. URL `https://<worker>.<his-subdomain>.workers.dev/mcp`, request header `x-api-key: <BRAIN_KEY>` (Claude only allows approved custom header names; `x-api-key` is one). The key never goes in the URL.
 6. Test: *"Log a door: no answer on Main St."*
 
 David is on Claude Free, which allows one custom connector. He has none yet, so this one fits.
 
-No secrets live in the code. `BRAIN_KEY` lives only in Doppler; the tokens live in GitHub Environments and on Cloudflare. He can revoke the token anytime from his Cloudflare profile; the Worker keeps running, only new deploys stop.
+No secrets live in the code. Every key lives in Doppler; GitHub holds only each Environment's `DOPPLER_TOKEN`. He can revoke the token anytime from his Cloudflare profile; the Worker keeps running, only new deploys stop.
 
 The [Deploy to Cloudflare button](https://deploy.workers.cloudflare.com/?url=https://github.com/natestream/david-wellington-brain) still works for a one-off copy, but it copies the repo into the deployer's GitHub, and that copy doesn't get updates from here. If it asks for the Vectorize **dimensions**, enter `768`, metric `cosine`.
 

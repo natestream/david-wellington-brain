@@ -45,10 +45,11 @@ function parseArgs(argv: string[]) {
 }
 
 const { url, doors: doorCount, health, cleanupFile } = parseArgs(process.argv.slice(2));
-// Same source as the server: Doppler when DOPPLER_TOKEN is set (#21), else BRAIN_KEY.
+// BRAIN_KEY if set (CI loads it from Doppler), else read it from Doppler with DOPPLER_TOKEN (#21).
 async function loadKey(): Promise<string> {
+  if (process.env.BRAIN_KEY) return process.env.BRAIN_KEY;
   const token = process.env.DOPPLER_TOKEN;
-  if (!token) return process.env.BRAIN_KEY ?? "";
+  if (!token) return "";
   const res = await fetch("https://api.doppler.com/v3/configs/config/secrets/download?format=json", {
     headers: { authorization: `Bearer ${token}`, accept: "application/json" },
   });
