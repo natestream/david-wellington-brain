@@ -13,12 +13,12 @@ David needs no Cloudflare, GitHub or Doppler account. Everything runs on Nate's 
 | Worker | `david-wellington-brain` | `david-brain` (wrangler `--env production`) |
 | Connector URL | `https://david-wellington-brain.nathanstream203.workers.dev/mcp` | `https://david-brain.nathanstream203.workers.dev/mcp` |
 | D1 / Vectorize / KV | `david-brain` / `david-brain-notes` / its own | `david-brain-prod` / `david-brain-notes-prod` / its own |
-| Doppler | `staging` + `staging_ci` | `prod` + `prod_ci` |
-| GitHub Environment | `staging` | `production` (Required reviewer: Nate) |
-| Deploys | every merge to `main`, then the full smoke test | after staging passes **and Nate clicks Approve**; read-only health check |
+| Doppler | `stg` + `stg_ci` | `prd` + `prd_ci` |
+| Started by | every merge to `main` | Claude, when Nate says "ship it" (**Run workflow**, target `production`) |
+| After deploy | full smoke test (writes, then cleans up) | read-only health check |
 | Reset | **Actions → Reset staging** (type `RESET`) | never |
 
-Test changes on staging in Claude, then approve the waiting production deploy in the Actions run (**Review deployments → Approve**).
+Test changes on staging in Claude, then tell Claude to ship: it runs **Deploy** with target `production`, which deploys staging again, runs the smoke test, then deploys production. GitHub needs no extra Environment, secret or variable: production's keys come from Doppler `prd_ci`, reached through `PRD_CI_DOPPLER_TOKEN` in `stg_ci`.
 
 ## David's setup: add the connector, sign in
 
@@ -31,13 +31,9 @@ Only Google accounts in `ALLOWED_EMAILS` get in, checked on every request, so ad
 
 ## One-time: production (before Saturday)
 
-1. **Google Cloud** (the same OAuth client as staging): **Clients →** your client **→ Authorized redirect URIs → add** `https://david-brain.nathanstream203.workers.dev/callback`.
-2. **Doppler** `door-brain`:
-   - config `prod`: a fresh `BRAIN_KEY` (`openssl rand -hex 32`), the same `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` as staging, `ALLOWED_EMAILS` = David's Gmail (plus Nate's if he wants in).
-   - config `prod_ci`: the same `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` as `staging_ci`, and `prod`'s read-only service token as `WORKER_DOPPLER_TOKEN`.
-3. **GitHub → Settings → Environments → New → `production`**: secret `DOPPLER_TOKEN` = `prod_ci`'s read-only service token; tick **Required reviewers** → Nate.
-4. **GitHub → Settings → Secrets and variables → Actions → Variables**: `PROD_TARGETS` = `["production"]`.
-5. **Actions → Deploy → Run workflow** → approve the production job. The first run creates David's empty database, index and sign-in store.
+1. **Google Cloud** (the same OAuth client as staging): **Clients →** your client **→ Authorized redirect URIs → add** `https://david-brain.nathanstream203.workers.dev/callback`. (No API for this; it's the one manual step.)
+2. **Doppler** `door-brain`: `prd` (`BRAIN_KEY`, Google client, `ALLOWED_EMAILS`) and `prd_ci` (Cloudflare token + account, `prd`'s read-only token as `WORKER_DOPPLER_TOKEN`). Plus, in `stg_ci`: `PRD_CI_DOPPLER_TOKEN` = a read-only service token for `prd_ci`.
+3. Claude runs **Deploy** with target `production`. The first run creates David's empty database, index and sign-in store.
 
 ## Sign-in with Google (#25)
 
@@ -45,7 +41,7 @@ Only Google accounts in `ALLOWED_EMAILS` get in, checked on every request, so ad
 
 Google setup, once: [Google Cloud Console](https://console.cloud.google.com/) → project → **Google Auth Platform → Branding** (Audience **External**, then **Publish app**: only `openid email`, so no Google review) → **Clients → Create client → Web application**, with one **Authorized redirect URI** per Worker: `https://<worker>.nathanstream203.workers.dev/callback`.
 
-| Doppler key (in `staging` and `prod`) | Value |
+| Doppler key (in `stg` and `prd`) | Value |
 |---|---|
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | the Google client (shared by both Workers) |
 | `ALLOWED_EMAILS` | who may sign in, e.g. `david@gmail.com, nate@gmail.com` |
@@ -59,7 +55,7 @@ Scripts (smoke test, import) use the `x-api-key: <BRAIN_KEY>` header instead of 
 
 1. **check**: typecheck + tests. Nothing deploys if they fail.
 2. **staging**: deploys, runs the full `npm run smoke` against it, then deletes the test data.
-3. **production** (one job per entry in `PROD_TARGETS`, each both a GitHub Environment and a wrangler env): waits for approval, deploys, then a read-only health check (`--health`: auth + sign-in discovery + tools list, writes nothing).
+3. **production**: only on **Run workflow** with target `production`. Deploys `--env production`, then a read-only health check (`--health`: auth + sign-in discovery + tools list, writes nothing).
 
 Each deploy (`scripts/ci-deploy.sh`, `WRANGLER_ENV` picks the Worker) creates the D1 database and Vectorize index (768, cosine) if they're missing, applies new migrations, then deploys with the Worker's `DOPPLER_TOKEN`. KV is created by the deploy itself. Re-deploys never touch data. Keep migrations additive (new tables/columns): they apply just before the new code goes live.
 
@@ -71,19 +67,20 @@ No sync. The deploy reads its keys from Doppler when it runs (`scripts/doppler-e
 
 | Config | Holds | Its read-only service token goes in |
 |---|---|---|
-| `staging` / `prod` | `BRAIN_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ALLOWED_EMAILS` | `staging_ci` / `prod_ci` as `WORKER_DOPPLER_TOKEN` |
-| `staging_ci` / `prod_ci` | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `WORKER_DOPPLER_TOKEN` | GitHub Environment `staging` / `production` as `DOPPLER_TOKEN` |
+| `stg` / `prd` | `BRAIN_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `ALLOWED_EMAILS` | `stg_ci` / `prd_ci` as `WORKER_DOPPLER_TOKEN` |
+| `stg_ci` | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `WORKER_DOPPLER_TOKEN`, `PRD_CI_DOPPLER_TOKEN` | GitHub Environment `staging` as `DOPPLER_TOKEN` (the only GitHub secret) |
+| `prd_ci` | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `WORKER_DOPPLER_TOKEN` | `stg_ci` as `PRD_CI_DOPPLER_TOKEN` |
 
 Two tokens per Worker so the running server can read only its own secrets, never the Cloudflare credentials. Service tokens: open the config → **Access → Service Tokens → Generate**, read-only.
 
 - The Worker keeps its secrets for 60 seconds, then asks Doppler again. If Doppler is down it keeps the last values; if it never got any, it refuses every request (503).
 - **Change who can sign in:** edit `ALLOWED_EMAILS`. **Change the script key:** new `BRAIN_KEY` (Claude users stay signed in; the sign-in page asks once more). Live within about a minute, no deploy.
-- **Change the Cloudflare token:** update it in `staging_ci` and `prod_ci`. The next deploy uses it.
+- **Change the Cloudflare token:** update it in `stg_ci` and `prd_ci`. The next deploy uses it.
 - **Change a Worker's Doppler token:** update `WORKER_DOPPLER_TOKEN` in its `_ci` config, then run the deploy once.
 
 ### Cloudflare API token
 
-**My Profile → API Tokens → Create Token → "Edit Cloudflare Workers" template**, plus account permissions **D1: Edit**, **Vectorize: Edit** and **Workers KV Storage: Edit**, **Account Resources** = Nate's account. Copy it into Doppler as `CLOUDFLARE_API_TOKEN` (both `_ci` configs).
+**My Profile → API Tokens → Create Token → "Edit Cloudflare Workers" template**, plus account permissions **D1: Edit**, **Vectorize: Edit** and **Workers KV Storage: Edit**, **Account Resources** = Nate's account. Copy it into Doppler as `CLOUDFLARE_API_TOKEN` (`stg_ci` and `prd_ci`).
 
 ## Core principle: Claude thinks, the server stores
 
@@ -286,4 +283,4 @@ Still to do on a real Cloudflare account:
 - [ ] Set up the `staging` Environment and run the Deploy workflow: staging job green (this deploys, migrates and runs the smoke test). Confirm D1 + Vectorize (768, cosine) exist in Nate's dashboard
 - [ ] Connect as a custom connector, then on a phone: log 5 fake doors with mixed objections, drop in a real Rotor pin export, give hours + ARR, re-upload the same day, run `objection_stats` + `get_kpis` for the week. This tests Claude's side (tool descriptions, PDF reading, coaching), which the script can't.
 - [ ] `npm run smoke -- --doors 60`, then check Workers AI neurons in the dashboard (expect about 20 of 10,000)
-- [ ] Saturday: `david` Environment + `PROD_TARGETS`, run the workflow, production job green
+- [ ] Saturday: Claude runs Deploy with target `production`, production job green; David adds the connector and signs in

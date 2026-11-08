@@ -1,19 +1,23 @@
-# One repo, every account. On merge to main (or "Run workflow"):
-#   check → staging (Nate's account, full smoke test) → production targets (David's account, health check)
-#
-# Each target is a GitHub Environment (Settings → Environments) with ONE secret: DOPPLER_TOKEN,
-# a read-only Doppler service token for that target's CI config. Every other key lives in Doppler and
-# is fetched at run time by scripts/doppler-env.sh (no sync). See README "All keys live in Doppler".
-# Production targets come from the repo variable PROD_TARGETS, e.g. ["production"]. Each entry is
-# both a GitHub Environment and a wrangler env (wrangler.jsonc "env"), on the same Cloudflare account.
-# Leave it unset and only staging deploys. Add "Required reviewers" to the Environment so each
-# production deploy waits for your Approve.
+# One repo, two Workers on Nate's Cloudflare account (wrangler.jsonc):
+#   push to main          → check → staging (full smoke test)
+#   Run workflow, target   → check → staging → production (David's brain, read-only health check)
+#     = production
+# Production deploys ONLY when started by hand with target "production" (Claude does this when
+# Nate says "ship it" in chat). Nothing in GitHub settings needs changing: the one GitHub secret is
+# the `staging` Environment's DOPPLER_TOKEN (Doppler stg_ci). Production's keys are one hop further:
+# stg_ci holds PRD_CI_DOPPLER_TOKEN, a read-only token for prd_ci (scripts/doppler-env.sh).
 name: Deploy
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      target:
+        description: "staging only, or staging then production (David's brain)"
+        type: choice
+        options: [staging, production]
+        default: staging
 
 # Never run two deploys at once; a newer merge waits for the running one.
 concurrency:
@@ -61,24 +65,22 @@ jobs:
 
   production:
     needs: staging
-    if: vars.PROD_TARGETS != ''
+    if: github.event_name == 'workflow_dispatch' && inputs.target == 'production'
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target: ${{ fromJSON(vars.PROD_TARGETS) }}
-    # Add "Required reviewers" to an Environment to approve each production deploy by hand.
-    environment: ${{ matrix.target }}
+    # The `staging` Environment only for its DOPPLER_TOKEN (stg_ci). Every production key comes from
+    # Doppler prd_ci, reached through stg_ci's PRD_CI_DOPPLER_TOKEN.
+    environment: staging
     env:
       DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
-      WRANGLER_ENV: ${{ matrix.target }}
+      DOPPLER_HOP: PRD_CI_DOPPLER_TOKEN
+      WRANGLER_ENV: production
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-      - name: Load keys from Doppler
+      - name: Load production keys from Doppler (prd_ci)
         run: scripts/doppler-env.sh
       - run: npm ci
       - id: deploy
