@@ -31,7 +31,7 @@ Doppler project `door-brain`, two configs per account (`staging` shown; David's 
 | Config | Holds | Its read-only service token goes in |
 |---|---|---|
 | `staging` | `BRAIN_KEY`: the connector key (`openssl rand -hex 32`, different per account) | `staging_ci` as `WORKER_DOPPLER_TOKEN` |
-| `staging_ci` (a **branch config** of `staging`, so it inherits `BRAIN_KEY`) | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `WORKER_DOPPLER_TOKEN` | GitHub Environment `staging` as `DOPPLER_TOKEN` |
+| `staging_ci` | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `WORKER_DOPPLER_TOKEN` (no `BRAIN_KEY`: the deploy reads it from `staging` with `WORKER_DOPPLER_TOKEN`, like the Worker) | GitHub Environment `staging` as `DOPPLER_TOKEN` |
 
 Two tokens so the running server can only read `BRAIN_KEY`, never the Cloudflare credentials. Service tokens: open the config → **Access → Service Tokens → Generate**, read-only.
 
@@ -56,7 +56,7 @@ In the account's Cloudflare dashboard: **My Profile → API Tokens → Create To
 
 1. He signs up at cloudflare.com (free, no card) and opens **Workers & Pages** once (sets up his workers.dev subdomain).
 2. He creates the API token (above) while you watch, and reads you his account ID.
-3. In Doppler, create `david` (a fresh `BRAIN_KEY`) and its branch `david_ci` (his Cloudflare token, account ID, and `david`'s service token as `WORKER_DOPPLER_TOKEN`). Create the `david` GitHub Environment with `david_ci`'s service token as `DOPPLER_TOKEN`, and set `PROD_TARGETS` to `["david"]`.
+3. In Doppler, create `david` (a fresh `BRAIN_KEY`) and `david_ci` (his Cloudflare token, account ID, and `david`'s service token as `WORKER_DOPPLER_TOKEN`). Create the `david` GitHub Environment with `david_ci`'s service token as `DOPPLER_TOKEN`, and set `PROD_TARGETS` to `["david"]`.
 4. **Actions → Deploy → Run workflow**. When the production job is green, its log shows his URL.
 5. In Claude: **Settings → Connectors → Add custom connector**. URL `https://<worker>.<his-subdomain>.workers.dev/mcp`, request header `x-api-key: <BRAIN_KEY>` (Claude only allows approved custom header names; `x-api-key` is one). The key never goes in the URL.
 6. Test: *"Log a door: no answer on Main St."*
