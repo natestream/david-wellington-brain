@@ -1,8 +1,9 @@
 # One repo, every account. On merge to main (or "Run workflow"):
 #   check → staging (Nate's account, full smoke test) → production targets (David's account, health check)
 #
-# Each target is a GitHub Environment (Settings → Environments) with 3 secrets:
-#   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, BRAIN_KEY
+# Each target is a GitHub Environment (Settings → Environments) with ONE secret: DOPPLER_TOKEN,
+# a read-only Doppler service token for that target's CI config. Every other key lives in Doppler and
+# is fetched at run time by scripts/doppler-env.sh (no sync). See README "All keys live in Doppler".
 # Production targets come from the repo variable PROD_TARGETS, e.g. ["david"].
 # Leave it unset and only staging deploys. A new client = a new Environment + one entry.
 name: Deploy
@@ -37,15 +38,15 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      BRAIN_KEY: ${{ secrets.BRAIN_KEY }}
+      DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - name: Load keys from Doppler
+        run: scripts/doppler-env.sh
       - run: npm ci
       - id: deploy
         run: scripts/ci-deploy.sh
@@ -67,15 +68,15 @@ jobs:
     # Add "Required reviewers" to an Environment to approve each production deploy by hand.
     environment: ${{ matrix.target }}
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      BRAIN_KEY: ${{ secrets.BRAIN_KEY }}
+      DOPPLER_TOKEN: ${{ secrets.DOPPLER_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
+      - name: Load keys from Doppler
+        run: scripts/doppler-env.sh
       - run: npm ci
       - id: deploy
         run: scripts/ci-deploy.sh

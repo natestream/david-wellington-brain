@@ -90,7 +90,7 @@ describe("/admin/import (#9)", () => {
     return worker.fetch(
       new Request("https://brain.example/admin/import", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-api-key": env.BRAIN_KEY },
+        headers: { "content-type": "application/json", "x-api-key": env.BRAIN_KEY ?? "" },
         body: JSON.stringify({ notes }),
       }),
       env,

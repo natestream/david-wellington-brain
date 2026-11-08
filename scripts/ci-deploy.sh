@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Deploy this Worker to one Cloudflare account (used by .github/workflows/deploy.yml).
 #
-# Needs: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, BRAIN_KEY.
+# Needs: CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, WORKER_DOPPLER_TOKEN (all from Doppler,
+# loaded by scripts/doppler-env.sh). The Worker gets WORKER_DOPPLER_TOKEN and reads BRAIN_KEY from
+# Doppler at runtime (#21), so changing the key needs no deploy.
 # Safe to re-run: creates D1 + Vectorize only if they're missing, migrations only apply once,
 # and the deploy replaces the previous version. Data is never touched.
 #
@@ -11,7 +13,7 @@ set -euo pipefail
 
 : "${CLOUDFLARE_API_TOKEN:?set CLOUDFLARE_API_TOKEN}"
 : "${CLOUDFLARE_ACCOUNT_ID:?set CLOUDFLARE_ACCOUNT_ID}"
-: "${BRAIN_KEY:?set BRAIN_KEY}"
+: "${WORKER_DOPPLER_TOKEN:?set WORKER_DOPPLER_TOKEN (in Doppler)}"
 
 DB_NAME="david-brain"
 INDEX_NAME="david-brain-notes"
@@ -42,7 +44,9 @@ echo "::group::Deploy"
 secrets="$(mktemp)"
 log="$(mktemp)"
 trap 'rm -f "$secrets" "$log"' EXIT
-node -e 'process.stdout.write(JSON.stringify({ BRAIN_KEY: process.env.BRAIN_KEY }))' > "$secrets"
+# Only the read-only token for the BRAIN_KEY config goes on the Worker, never the CI token, so the
+# running server can't read the Cloudflare credentials. Any BRAIN_KEY secret on it is ignored.
+node -e 'process.stdout.write(JSON.stringify({ DOPPLER_TOKEN: process.env.WORKER_DOPPLER_TOKEN }))' > "$secrets"
 wrangler deploy --secrets-file "$secrets" 2>&1 | tee "$log"
 echo "::endgroup::"
 

@@ -3,6 +3,7 @@
  *
  * Usage:
  *   BRAIN_KEY=... npm run smoke -- --url https://<worker>.workers.dev
+ *   DOPPLER_TOKEN=... npm run smoke -- --url ...   # key read from Doppler, like the server
  *   BRAIN_KEY=... npm run smoke -- --url https://<worker>.workers.dev --doors 60   # simulated full day
  *   BRAIN_KEY=... npm run smoke -- --url https://<worker>.workers.dev --health     # steps 1-2 only, writes nothing
  *   --cleanup-file <path>: also write the cleanup commands to a shell script (CI runs it after)
@@ -44,9 +45,25 @@ function parseArgs(argv: string[]) {
 }
 
 const { url, doors: doorCount, health, cleanupFile } = parseArgs(process.argv.slice(2));
-const key = process.env.BRAIN_KEY ?? "";
+// BRAIN_KEY if set (CI loads it from Doppler), else read it from Doppler with DOPPLER_TOKEN (#21).
+async function loadKey(): Promise<string> {
+  if (process.env.BRAIN_KEY) return process.env.BRAIN_KEY;
+  const token = process.env.DOPPLER_TOKEN;
+  if (!token) return "";
+  const res = await fetch("https://api.doppler.com/v3/configs/config/secrets/download?format=json", {
+    headers: { authorization: `Bearer ${token}`, accept: "application/json" },
+  });
+  if (!res.ok) {
+    console.error(`Doppler: HTTP ${res.status}. Is DOPPLER_TOKEN a service token for this config?`);
+    process.exit(2);
+  }
+  const k = String(((await res.json()) as Record<string, unknown>).BRAIN_KEY ?? "").trim();
+  if (k && process.env.GITHUB_ACTIONS) console.log(`::add-mask::${k}`); // keep it out of CI logs
+  return k;
+}
+const key = await loadKey();
 if (!url || !key || !Number.isInteger(doorCount) || doorCount < 1) {
-  console.error("Usage: BRAIN_KEY=... npm run smoke -- --url https://<worker>.workers.dev [--doors 60] [--health] [--cleanup-file path]");
+  console.error("Usage: DOPPLER_TOKEN=... (or BRAIN_KEY=...) npm run smoke -- --url https://<worker>.workers.dev [--doors 60] [--health] [--cleanup-file path]");
   process.exit(2);
 }
 const base = url.replace(/\/+$/, "");

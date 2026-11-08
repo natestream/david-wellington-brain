@@ -1,6 +1,7 @@
 import { handleImport } from "./admin";
 import type { Env } from "./env";
 import { isAuthorized, unauthorized } from "./lib/auth";
+import { getBrainKey } from "./lib/keystore";
 import { handleMcp } from "./mcp";
 
 export default {
@@ -14,10 +15,9 @@ export default {
     }
 
     if (pathname === "/mcp" || pathname === "/admin/import") {
-      if (!env.BRAIN_KEY) {
-        return new Response("Server not configured: set the BRAIN_KEY secret.\n", { status: 500 });
-      }
-      if (!(await isAuthorized(request, env.BRAIN_KEY))) return unauthorized();
+      const brainKey = await getBrainKey(env);
+      if (!brainKey.ok) return new Response(`${brainKey.error}\n`, { status: brainKey.status });
+      if (!(await isAuthorized(request, brainKey.key))) return unauthorized();
       return pathname === "/mcp" ? handleMcp(request, env) : handleImport(request, env);
     }
 
